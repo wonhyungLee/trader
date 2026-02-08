@@ -1,0 +1,11 @@
+liquidity_rank: 300
+min_amount: 50000000000
+buy:
+  kospi_disparity: -0.05
+  kosdaq_disparity: -0.10
+sell:
+  take_profit_disparity: -0.01
+  stop_loss: -0.05
+  max_holding_days: 3
+position:
+  max_positions: 10

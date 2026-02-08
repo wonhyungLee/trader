@@ -1,0 +1,30 @@
+[Unit]
+Description=Trading Bot with Auto Restart Manager
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/new_trading_bot
+Environment=PYTHONPATH=/home/ubuntu/new_trading_bot
+ExecStart=/usr/bin/python3 /home/ubuntu/new_trading_bot/restart_manager.py
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+# 환경 변수 파일 로드
+EnvironmentFile=-/home/ubuntu/new_trading_bot/.env
+
+# 리소스 제한
+LimitNOFILE=65536
+MemoryMax=2G
+
+# 보안 설정
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

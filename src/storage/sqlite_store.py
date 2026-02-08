@@ -1,0 +1,292 @@
+import sqlite3
+import os
+import pandas as pd
+from typing import List, Dict, Any, Optional, Iterable
+from datetime import datetime
+
+SCHEMA = {
+    "stock_info": """
+        CREATE TABLE IF NOT EXISTS stock_info (
+            code TEXT PRIMARY KEY,
+            name TEXT,
+            market TEXT,
+            marcap REAL,
+            updated_at TEXT
+        );
+    """,
+    "daily_price": """
+        CREATE TABLE IF NOT EXISTS daily_price (
+            date TEXT,
+            code TEXT,
+            open REAL,
+            high REAL,
+            low REAL,
+            close REAL,
+            volume INTEGER,
+            amount REAL,
+            ma25 REAL,
+            disparity REAL,
+            PRIMARY KEY (date, code)
+        );
+    """,
+    "order_queue": """
+        CREATE TABLE IF NOT EXISTS order_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_date TEXT,
+            exec_date TEXT,
+            code TEXT,
+            side TEXT,
+            qty INTEGER,
+            rank INTEGER,
+            status TEXT,
+            ord_dvsn TEXT,
+            ord_unpr REAL,
+            odno TEXT,
+            ord_orgno TEXT,
+            filled_qty INTEGER,
+            avg_price REAL,
+            api_resp TEXT,
+            cancel_resp TEXT,
+            created_at TEXT,
+            sent_at TEXT,
+            updated_at TEXT
+        );
+    """,
+    "position_state": """
+        CREATE TABLE IF NOT EXISTS position_state (
+            code TEXT PRIMARY KEY,
+            name TEXT,
+            qty INTEGER,
+            avg_price REAL,
+            entry_date TEXT,
+            updated_at TEXT
+        );
+    """,
+    "refill_progress": """
+        CREATE TABLE IF NOT EXISTS refill_progress (
+            code TEXT PRIMARY KEY,
+            last_fetched_end_date TEXT,
+            min_date_in_db TEXT,
+            status TEXT,
+            updated_at TEXT
+        );
+    """,
+}
+
+INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_daily_price_code_date ON daily_price(code, date);",
+    "CREATE INDEX IF NOT EXISTS idx_order_queue_exec_status ON order_queue(exec_date, status);",
+    "CREATE INDEX IF NOT EXISTS idx_order_queue_status ON order_queue(status);",
+    "CREATE INDEX IF NOT EXISTS idx_refill_progress_status ON refill_progress(status);",
+]
+
+
+class SQLiteStore:
+    def __init__(self, db_path: str = "data/market_data.db"):
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        self.db_path = db_path
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self.conn.execute("PRAGMA journal_mode=WAL;")
+        self.conn.row_factory = sqlite3.Row
+        self.ensure_schema()
+
+    def ensure_schema(self):
+        cur = self.conn.cursor()
+        for ddl in SCHEMA.values():
+            cur.execute(ddl)
+        for idx in INDEXES:
+            cur.execute(idx)
+        self.conn.commit()
+
+    # ---------- stock_info ----------
+    def upsert_stock_info(self, rows: Iterable[Dict[str, Any]]):
+        now = datetime.utcnow().isoformat()
+        data = []
+        for r in rows:
+            data.append(
+                (
+                    r.get("code"),
+                    r.get("name"),
+                    r.get("market"),
+                    float(r.get("marcap") or 0),
+                    now,
+                )
+            )
+        self.conn.executemany(
+            """
+            INSERT INTO stock_info(code, name, market, marcap, updated_at)
+            VALUES(?,?,?,?,?)
+            ON CONFLICT(code) DO UPDATE SET
+                name=excluded.name,
+                market=excluded.market,
+                marcap=excluded.marcap,
+                updated_at=excluded.updated_at;
+            """,
+            data,
+        )
+        self.conn.commit()
+
+    def list_stock_codes(self) -> List[str]:
+        cur = self.conn.execute("SELECT code FROM stock_info")
+        return [row[0] for row in cur.fetchall()]
+
+    def get_stock(self, code: str) -> Optional[sqlite3.Row]:
+        cur = self.conn.execute("SELECT * FROM stock_info WHERE code=?", (code,))
+        return cur.fetchone()
+
+    # ---------- daily_price ----------
+    def upsert_daily_prices(self, code: str, df: pd.DataFrame):
+        if df.empty:
+            return
+        cols = ["date", "code", "open", "high", "low", "close", "volume", "amount", "ma25", "disparity"]
+        df = df.copy()
+        df["code"] = code
+        df = df[cols]
+        records = [tuple(x) for x in df.to_numpy()]
+        self.conn.executemany(
+            """
+            INSERT OR REPLACE INTO daily_price(date, code, open, high, low, close, volume, amount, ma25, disparity)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+            """,
+            records,
+        )
+        self.conn.commit()
+
+    def last_price_date(self, code: str) -> Optional[str]:
+        cur = self.conn.execute("SELECT max(date) FROM daily_price WHERE code=?", (code,))
+        row = cur.fetchone()
+        return row[0] if row and row[0] else None
+
+    def load_prices(self, codes: List[str]) -> pd.DataFrame:
+        placeholder = ",".join("?" * len(codes))
+        cur = self.conn.execute(
+            f"SELECT * FROM daily_price WHERE code IN ({placeholder})", tuple(codes)
+        )
+        return pd.DataFrame(cur.fetchall(), columns=[c[0] for c in cur.description])
+
+    def load_all_prices(self) -> pd.DataFrame:
+        cur = self.conn.execute("SELECT * FROM daily_price")
+        return pd.DataFrame(cur.fetchall(), columns=[c[0] for c in cur.description])
+
+    # ---------- order_queue ----------
+    def add_pending_orders(self, orders: List[Dict[str, Any]], exec_date: str):
+        now = datetime.utcnow().isoformat()
+        rows = []
+        for o in orders:
+            rows.append(
+                (
+                    o.get("signal_date"),
+                    exec_date,
+                    o["code"],
+                    o["side"],
+                    int(o["qty"]),
+                    int(o.get("rank", 0)),
+                    "PENDING",
+                    o.get("ord_dvsn", "01"),
+                    float(o.get("ord_unpr") or 0),
+                    None,
+                    None,
+                    0,
+                    0.0,
+                    None,
+                    None,
+                    now,
+                    None,
+                    now,
+                )
+            )
+        self.conn.executemany(
+            """
+            INSERT INTO order_queue(
+                signal_date, exec_date, code, side, qty, rank, status, ord_dvsn, ord_unpr,
+                odno, ord_orgno, filled_qty, avg_price, api_resp, cancel_resp, created_at, sent_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            rows,
+        )
+        self.conn.commit()
+
+    def list_orders(self, status: Optional[List[str]] = None, exec_date: Optional[str] = None) -> List[sqlite3.Row]:
+        query = "SELECT * FROM order_queue WHERE 1=1"
+        params: List[Any] = []
+        if status:
+            placeholder = ",".join("?" * len(status))
+            query += f" AND status IN ({placeholder})"
+            params.extend(status)
+        if exec_date:
+            query += " AND exec_date=?"
+            params.append(exec_date)
+        query += " ORDER BY rank ASC, id ASC"
+        cur = self.conn.execute(query, tuple(params))
+        return cur.fetchall()
+
+    def update_order_status(self, order_id: int, status: str, **kwargs):
+        fields = ["status=?", "updated_at=?"]
+        params: List[Any] = [status, datetime.utcnow().isoformat()]
+        if "odno" in kwargs:
+            fields.append("odno=?")
+            params.append(kwargs["odno"])
+        if "ord_orgno" in kwargs:
+            fields.append("ord_orgno=?")
+            params.append(kwargs["ord_orgno"])
+        if "api_resp" in kwargs:
+            fields.append("api_resp=?")
+            params.append(kwargs["api_resp"])
+        if "sent_at" in kwargs:
+            fields.append("sent_at=?")
+            params.append(kwargs["sent_at"])
+        if "filled_qty" in kwargs:
+            fields.append("filled_qty=?")
+            params.append(kwargs["filled_qty"])
+        if "avg_price" in kwargs:
+            fields.append("avg_price=?")
+            params.append(kwargs["avg_price"])
+        sql = f"UPDATE order_queue SET {', '.join(fields)} WHERE id=?"
+        params.append(order_id)
+        self.conn.execute(sql, tuple(params))
+        self.conn.commit()
+
+    # ---------- position_state ----------
+    def upsert_position(self, code: str, name: str, qty: int, avg_price: float, entry_date: str):
+        now = datetime.utcnow().isoformat()
+        self.conn.execute(
+            """
+            INSERT INTO position_state(code, name, qty, avg_price, entry_date, updated_at)
+            VALUES(?,?,?,?,?,?)
+            ON CONFLICT(code) DO UPDATE SET
+                qty=excluded.qty,
+                avg_price=excluded.avg_price,
+                entry_date=excluded.entry_date,
+                updated_at=excluded.updated_at;
+            """,
+            (code, name, qty, avg_price, entry_date, now),
+        )
+        self.conn.commit()
+
+    def list_positions(self) -> List[sqlite3.Row]:
+        cur = self.conn.execute("SELECT * FROM position_state")
+        return cur.fetchall()
+
+    # ---------- refill_progress ----------
+    def get_refill_status(self, code: str) -> Optional[sqlite3.Row]:
+        cur = self.conn.execute("SELECT * FROM refill_progress WHERE code=?", (code,))
+        return cur.fetchone()
+
+    def upsert_refill_status(self, code: str, last_end: Optional[str], min_date: Optional[str], status: str):
+        now = datetime.utcnow().isoformat()
+        self.conn.execute(
+            """
+            INSERT INTO refill_progress(code, last_fetched_end_date, min_date_in_db, status, updated_at)
+            VALUES(?,?,?,?,?)
+            ON CONFLICT(code) DO UPDATE SET
+                last_fetched_end_date=excluded.last_fetched_end_date,
+                min_date_in_db=excluded.min_date_in_db,
+                status=excluded.status,
+                updated_at=excluded.updated_at;
+            """,
+            (code, last_end, min_date, status, now),
+        )
+        self.conn.commit()
+
+    def close(self):
+        self.conn.close()

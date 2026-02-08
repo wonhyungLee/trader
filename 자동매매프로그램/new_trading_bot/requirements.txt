@@ -1,0 +1,7 @@
+ccxt==4.1.77
+python-dotenv==1.0.0
+asyncio
+aiohttp==3.9.1
+loguru==0.7.2
+schedule==1.2.0
+requests==2.31.0
