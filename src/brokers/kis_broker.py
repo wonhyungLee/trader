@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
+
 import requests
+from requests import HTTPError, RequestException
 
 from src.utils.config import load_settings
+from src.utils.http_retry import is_retryable_status, sleep_backoff
 
 
 TOKEN_CACHE_DEFAULT = ".cache/kis_token.json"
@@ -23,6 +27,19 @@ class KISBroker:
         self.account_product = self.settings["kis"].get("acnt_prdt_cd", "01")
         self.custtype = self.settings["kis"].get("custtype", "P")
         self.rate_limit_sleep = float(self.settings["kis"].get("rate_limit_sleep_sec", 0.5))
+        self.timeout_connect = float(self.settings["kis"].get("timeout_connect_sec", 5))
+        self.timeout_read = float(self.settings["kis"].get("timeout_read_sec", 20))
+        self.max_retries = int(self.settings["kis"].get("max_retries", 8))
+        self.backoff_base = float(self.settings["kis"].get("backoff_base_sec", 2))
+        self.backoff_cap = float(self.settings["kis"].get("backoff_cap_sec", 60))
+        self.backoff_jitter = float(self.settings["kis"].get("backoff_jitter_sec", 0.5))
+        self.consecutive_error_cooldown_after = int(
+            self.settings["kis"].get("consecutive_error_cooldown_after", 10)
+        )
+        self.consecutive_error_cooldown_sec = float(
+            self.settings["kis"].get("consecutive_error_cooldown_sec", 180)
+        )
+        self.session_reset_every = int(self.settings["kis"].get("session_reset_every", 3))
         self.base_url = self.settings["kis"].get(
             "base_url_prod" if self.env == "prod" else "base_url_paper",
             "https://openapivts.koreainvestment.com:29443",
@@ -36,6 +53,7 @@ class KISBroker:
         self.session = requests.Session()
         self._token: Optional[str] = None
         self._token_expire: Optional[datetime] = None
+        self._consecutive_errors = 0
 
     # ---------------- Token -----------------
     def _load_token_cache(self):
@@ -98,27 +116,87 @@ class KISBroker:
         return key
 
     # --------------- Base request ---------------
-    def request(self, tr_id: str, url: str, method: str = "GET", params=None, data=None, json_body=None) -> Dict[str, Any]:
-        token = self.ensure_token()
-        headers = {
-            "content-type": "application/json; charset=utf-8",
-            "authorization": f"Bearer {token}",
-            "appkey": self.app_key,
-            "appsecret": self.app_secret,
-            "tr_id": tr_id,
-        }
-        if self.custtype:
-            headers["custtype"] = self.custtype
-        time.sleep(self.rate_limit_sleep)
-        if method.upper() == "GET":
-            resp = self.session.get(url, headers=headers, params=params, timeout=10)
-        else:
-            resp = self.session.post(url, headers=headers, params=params, data=data, json=json_body, timeout=10)
-        resp.raise_for_status()
-        try:
-            return resp.json()
-        except Exception:
-            return {"text": resp.text}
+    def request(
+        self,
+        tr_id: str,
+        url: str,
+        method: str = "GET",
+        params=None,
+        data=None,
+        json_body=None,
+        max_retries: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        method = method.upper()
+        last_exc: Optional[Exception] = None
+        token_refreshed = False
+        retries = self.max_retries if max_retries is None else max(1, int(max_retries))
+
+        for attempt in range(1, max(1, retries) + 1):
+            if attempt > 1 and self.session_reset_every > 0 and (attempt - 1) % self.session_reset_every == 0:
+                self.session = requests.Session()
+
+            token = self.ensure_token()
+            headers = {
+                "content-type": "application/json; charset=utf-8",
+                "authorization": f"Bearer {token}",
+                "appkey": self.app_key,
+                "appsecret": self.app_secret,
+                "tr_id": tr_id,
+            }
+            if self.custtype:
+                headers["custtype"] = self.custtype
+
+            try:
+                time.sleep(self.rate_limit_sleep)
+                timeout = (self.timeout_connect, self.timeout_read)
+                if method == "GET":
+                    resp = self.session.get(url, headers=headers, params=params, timeout=timeout)
+                else:
+                    resp = self.session.post(url, headers=headers, params=params, data=data, json=json_body, timeout=timeout)
+
+                if resp.status_code in (401, 403) and not token_refreshed:
+                    token, exp = self.issue_token()
+                    self._save_token_cache(token, exp)
+                    token_refreshed = True
+                    continue
+
+                if is_retryable_status(resp.status_code):
+                    raise HTTPError(f"{resp.status_code} retryable", response=resp)
+
+                resp.raise_for_status()
+                self._consecutive_errors = 0
+                try:
+                    return resp.json()
+                except Exception:
+                    return {"text": resp.text}
+            except HTTPError as exc:
+                status = exc.response.status_code if getattr(exc, "response", None) else None
+                if not is_retryable_status(status):
+                    raise
+                last_exc = exc
+            except RequestException as exc:
+                last_exc = exc
+
+            self._consecutive_errors += 1
+            if (
+                self.consecutive_error_cooldown_after > 0
+                and self._consecutive_errors >= self.consecutive_error_cooldown_after
+            ):
+                logging.warning(
+                    "KIS consecutive errors=%s, cooldown %.1fs",
+                    self._consecutive_errors,
+                    self.consecutive_error_cooldown_sec,
+                )
+                time.sleep(self.consecutive_error_cooldown_sec)
+                self._consecutive_errors = 0
+
+            if attempt < retries:
+                delay = sleep_backoff(attempt, self.backoff_base, self.backoff_cap, self.backoff_jitter)
+                logging.warning("KIS retry %s/%s in %.1fs (%s)", attempt, retries, delay, tr_id)
+
+        if last_exc:
+            raise last_exc
+        raise RuntimeError("request failed")
 
     # --------------- Trading ---------------
     def _tr_id(self, paper_code: str, prod_code: str) -> str:

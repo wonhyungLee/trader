@@ -71,6 +71,66 @@ SCHEMA = {
             updated_at TEXT
         );
     """,
+    "investor_flow_daily": """
+        CREATE TABLE IF NOT EXISTS investor_flow_daily (
+            date TEXT,
+            code TEXT,
+            foreign_net_value REAL,
+            inst_net_value REAL,
+            indiv_net_value REAL,
+            updated_at TEXT,
+            PRIMARY KEY (date, code)
+        );
+    """,
+    "program_trade_daily": """
+        CREATE TABLE IF NOT EXISTS program_trade_daily (
+            date TEXT,
+            code TEXT,
+            program_net_value REAL,
+            updated_at TEXT,
+            PRIMARY KEY (date, code)
+        );
+    """,
+    "short_sale_daily": """
+        CREATE TABLE IF NOT EXISTS short_sale_daily (
+            date TEXT,
+            code TEXT,
+            short_volume REAL,
+            short_value REAL,
+            short_ratio REAL,
+            updated_at TEXT,
+            PRIMARY KEY (date, code)
+        );
+    """,
+    "credit_balance_daily": """
+        CREATE TABLE IF NOT EXISTS credit_balance_daily (
+            date TEXT,
+            code TEXT,
+            credit_qty REAL,
+            credit_value REAL,
+            updated_at TEXT,
+            PRIMARY KEY (date, code)
+        );
+    """,
+    "loan_trans_daily": """
+        CREATE TABLE IF NOT EXISTS loan_trans_daily (
+            date TEXT,
+            code TEXT,
+            loan_qty REAL,
+            loan_value REAL,
+            updated_at TEXT,
+            PRIMARY KEY (date, code)
+        );
+    """,
+    "vi_status_daily": """
+        CREATE TABLE IF NOT EXISTS vi_status_daily (
+            date TEXT,
+            code TEXT,
+            vi_count INTEGER,
+            updated_at TEXT,
+            PRIMARY KEY (date, code)
+        );
+    """,
 }
 
 INDEXES = [
@@ -78,6 +138,12 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_order_queue_exec_status ON order_queue(exec_date, status);",
     "CREATE INDEX IF NOT EXISTS idx_order_queue_status ON order_queue(status);",
     "CREATE INDEX IF NOT EXISTS idx_refill_progress_status ON refill_progress(status);",
+    "CREATE INDEX IF NOT EXISTS idx_investor_flow_daily_code_date ON investor_flow_daily(code, date);",
+    "CREATE INDEX IF NOT EXISTS idx_program_trade_daily_code_date ON program_trade_daily(code, date);",
+    "CREATE INDEX IF NOT EXISTS idx_short_sale_daily_code_date ON short_sale_daily(code, date);",
+    "CREATE INDEX IF NOT EXISTS idx_credit_balance_daily_code_date ON credit_balance_daily(code, date);",
+    "CREATE INDEX IF NOT EXISTS idx_loan_trans_daily_code_date ON loan_trans_daily(code, date);",
+    "CREATE INDEX IF NOT EXISTS idx_vi_status_daily_code_date ON vi_status_daily(code, date);",
 ]
 
 
@@ -285,6 +351,163 @@ class SQLiteStore:
                 updated_at=excluded.updated_at;
             """,
             (code, last_end, min_date, status, now),
+        )
+        self.conn.commit()
+
+    # ---------- accuracy data ----------
+    def upsert_investor_flow(self, rows: Iterable[Dict[str, Any]]):
+        now = datetime.utcnow().isoformat()
+        data = []
+        for r in rows:
+            data.append(
+                (
+                    r.get("date"),
+                    r.get("code"),
+                    float(r.get("foreign_net_value") or 0),
+                    float(r.get("inst_net_value") or 0),
+                    float(r.get("indiv_net_value") or 0),
+                    now,
+                )
+            )
+        self.conn.executemany(
+            """
+            INSERT INTO investor_flow_daily(date, code, foreign_net_value, inst_net_value, indiv_net_value, updated_at)
+            VALUES(?,?,?,?,?,?)
+            ON CONFLICT(date, code) DO UPDATE SET
+                foreign_net_value=excluded.foreign_net_value,
+                inst_net_value=excluded.inst_net_value,
+                indiv_net_value=excluded.indiv_net_value,
+                updated_at=excluded.updated_at;
+            """,
+            data,
+        )
+        self.conn.commit()
+
+    def upsert_program_trade(self, rows: Iterable[Dict[str, Any]]):
+        now = datetime.utcnow().isoformat()
+        data = []
+        for r in rows:
+            data.append(
+                (
+                    r.get("date"),
+                    r.get("code"),
+                    float(r.get("program_net_value") or 0),
+                    now,
+                )
+            )
+        self.conn.executemany(
+            """
+            INSERT INTO program_trade_daily(date, code, program_net_value, updated_at)
+            VALUES(?,?,?,?)
+            ON CONFLICT(date, code) DO UPDATE SET
+                program_net_value=excluded.program_net_value,
+                updated_at=excluded.updated_at;
+            """,
+            data,
+        )
+        self.conn.commit()
+
+    def upsert_short_sale(self, rows: Iterable[Dict[str, Any]]):
+        now = datetime.utcnow().isoformat()
+        data = []
+        for r in rows:
+            data.append(
+                (
+                    r.get("date"),
+                    r.get("code"),
+                    float(r.get("short_volume") or 0),
+                    float(r.get("short_value") or 0),
+                    float(r.get("short_ratio") or 0),
+                    now,
+                )
+            )
+        self.conn.executemany(
+            """
+            INSERT INTO short_sale_daily(date, code, short_volume, short_value, short_ratio, updated_at)
+            VALUES(?,?,?,?,?,?)
+            ON CONFLICT(date, code) DO UPDATE SET
+                short_volume=excluded.short_volume,
+                short_value=excluded.short_value,
+                short_ratio=excluded.short_ratio,
+                updated_at=excluded.updated_at;
+            """,
+            data,
+        )
+        self.conn.commit()
+
+    def upsert_credit_balance(self, rows: Iterable[Dict[str, Any]]):
+        now = datetime.utcnow().isoformat()
+        data = []
+        for r in rows:
+            data.append(
+                (
+                    r.get("date"),
+                    r.get("code"),
+                    float(r.get("credit_qty") or 0),
+                    float(r.get("credit_value") or 0),
+                    now,
+                )
+            )
+        self.conn.executemany(
+            """
+            INSERT INTO credit_balance_daily(date, code, credit_qty, credit_value, updated_at)
+            VALUES(?,?,?,?,?)
+            ON CONFLICT(date, code) DO UPDATE SET
+                credit_qty=excluded.credit_qty,
+                credit_value=excluded.credit_value,
+                updated_at=excluded.updated_at;
+            """,
+            data,
+        )
+        self.conn.commit()
+
+    def upsert_loan_trans(self, rows: Iterable[Dict[str, Any]]):
+        now = datetime.utcnow().isoformat()
+        data = []
+        for r in rows:
+            data.append(
+                (
+                    r.get("date"),
+                    r.get("code"),
+                    float(r.get("loan_qty") or 0),
+                    float(r.get("loan_value") or 0),
+                    now,
+                )
+            )
+        self.conn.executemany(
+            """
+            INSERT INTO loan_trans_daily(date, code, loan_qty, loan_value, updated_at)
+            VALUES(?,?,?,?,?)
+            ON CONFLICT(date, code) DO UPDATE SET
+                loan_qty=excluded.loan_qty,
+                loan_value=excluded.loan_value,
+                updated_at=excluded.updated_at;
+            """,
+            data,
+        )
+        self.conn.commit()
+
+    def upsert_vi_status(self, rows: Iterable[Dict[str, Any]]):
+        now = datetime.utcnow().isoformat()
+        data = []
+        for r in rows:
+            data.append(
+                (
+                    r.get("date"),
+                    r.get("code"),
+                    int(r.get("vi_count") or 0),
+                    now,
+                )
+            )
+        self.conn.executemany(
+            """
+            INSERT INTO vi_status_daily(date, code, vi_count, updated_at)
+            VALUES(?,?,?,?)
+            ON CONFLICT(date, code) DO UPDATE SET
+                vi_count=excluded.vi_count,
+                updated_at=excluded.updated_at;
+            """,
+            data,
         )
         self.conn.commit()
 

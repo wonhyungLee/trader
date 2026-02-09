@@ -59,6 +59,28 @@ def _load_personal_env(path: str = "개인정보") -> None:
     except Exception:
         return
 
+    # Optional override: select a specific KIS key index (1..50).
+    # This is useful to rotate appkeys without editing code.
+    key_index = os.environ.get("KIS_KEY_INDEX")
+    if key_index:
+        try:
+            idx = int(key_index)
+        except Exception:
+            idx = 0
+        if 1 <= idx <= 50:
+            key = kv.get(f"KIS{idx}_KEY")
+            sec = kv.get(f"KIS{idx}_SECRET")
+            num = kv.get(f"KIS{idx}_ACCOUNT_NUMBER")
+            code = kv.get(f"KIS{idx}_ACCOUNT_CODE")
+            if key:
+                os.environ["KIS_APP_KEY"] = key
+            if sec:
+                os.environ["KIS_APP_SECRET"] = sec
+            if num:
+                os.environ["KIS_ACCOUNT_NO"] = num
+            if code:
+                os.environ["KIS_ACNT_PRDT_CD"] = code
+
     if "KIS_APP_KEY" not in os.environ:
         for i in range(1, 51):
             key = kv.get(f"KIS{i}_KEY")

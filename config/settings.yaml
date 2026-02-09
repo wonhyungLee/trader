@@ -11,7 +11,16 @@ kis:
   account_no: "${KIS_ACCOUNT_NO}"  # 예: 00000000-01
   custtype: "P"
   token_cache_path: ".cache/kis_token.json"
-  rate_limit_sleep_sec: 0.5
+  rate_limit_sleep_sec: 0.06
+  timeout_connect_sec: 5
+  timeout_read_sec: 20
+  max_retries: 8
+  backoff_base_sec: 2
+  backoff_cap_sec: 60
+  backoff_jitter_sec: 0.5
+  consecutive_error_cooldown_after: 10
+  consecutive_error_cooldown_sec: 180
+  session_reset_every: 3
 
 logging:
   level: "INFO"
@@ -46,7 +55,7 @@ monitor:
   scan_interval_sec: 60
   rest_batch_size: 30
   rest_max_retries: 5
-  max_ws_subs: 20
+  max_ws_subs: 41
   subscribe_cooldown_sec: 180
   alert_cooldown_sec: 600
   universe_paths:

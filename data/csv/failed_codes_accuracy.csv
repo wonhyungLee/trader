@@ -1,0 +1,26 @@
+ts,code,error
+2026-02-09T04:02:14.108369,048410,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:09:17.132372,048430,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:16:21.375944,048470,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:26:35.838296,048430,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:33:38.921848,048470,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:52:18.870471,048530,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:52:22.289919,048550,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:52:24.581588,048770,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:52:28.295509,048830,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:52:29.976581,048870,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:52:31.969245,048910,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:52:33.678548,049070,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:52:35.512501,049080,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:52:37.647743,049120,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:52:40.202388,049180,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:52:42.222704,049430,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:52:44.176501,049470,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:52:46.045229,049480,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:52:47.929087,049520,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:52:49.449527,049550,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:55:05.252784,048430,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:55:07.379077,048470,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:55:10.464432,048530,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:55:12.665209,048550,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable
+2026-02-09T04:55:15.253567,048770,inv=500 retryable; prog=500 retryable; short=500 retryable; credit=500 retryable; loan=500 retryable; vi=500 retryable

@@ -15,3 +15,6 @@ node_modules/
 dist/
 .DS_Store
 개인정보
+.venv/
+data/*.lock
+data/*.json
