@@ -32,17 +32,24 @@ class KISCollector:
         output = res.get("output", []) if isinstance(res, dict) else []
         if not output:
             return pd.DataFrame()
+        
         records = []
         for row in output:
+            vol = float(row.get("acml_vol") or row.get("cntg_vol") or 0)
+            close = float(row["stck_clpr"])
+            amount = float(row.get("acml_tr_pbmn") or 0)
+            if amount <= 0:
+                amount = close * vol
+                
             records.append(
                 {
                     "date": datetime.strptime(row["stck_bsop_date"], "%Y%m%d").strftime("%Y-%m-%d"),
                     "open": float(row["stck_oprc"]),
                     "high": float(row["stck_hgpr"]),
                     "low": float(row["stck_lwpr"]),
-                    "close": float(row["stck_clpr"]),
-                    "volume": int(float(row["cntg_vol"])),
-                    "amount": float(row.get("acml_tr_pbmn") or 0),
+                    "close": close,
+                    "volume": int(vol),
+                    "amount": amount,
                 }
             )
         df = pd.DataFrame(records)

@@ -22,7 +22,7 @@ class KISPriceClient:
         self.base_url = self.kis.get(
             "base_url_prod" if self.settings.get("env", "paper") == "prod" else "base_url_paper"
         )
-        self.rate_sleep = max(float(self.kis.get("rate_limit_sleep_sec", 0.5)), 0.5)
+        # self.rate_sleep is no longer needed; KISBroker handles it.
 
     def _tr_id(self) -> str:
         # 기간별 시세(일봉) TR
@@ -40,5 +40,5 @@ class KISPriceClient:
             "FID_PERIOD_DIV_CODE": "D",
             "FID_ORG_ADJ_PRC": "1",
         }
-        time.sleep(self.rate_sleep)
+        # time.sleep(self.rate_sleep) -> Handled by broker.request
         return self.broker.request(tr_id, url, params=params)

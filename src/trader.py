@@ -39,8 +39,12 @@ def generate_signals(store: SQLiteStore, settings: Dict) -> List[Dict]:
     if prices.empty:
         logging.error("daily_price가 비어있습니다. daily_loader를 먼저 실행하세요.")
         return []
-    # latest row per code
-    latest = prices.sort_values("date").groupby("code").tail(1)
+    # latest row per code (+ ma25_prev for trend filter)
+    prices = prices.sort_values("date")
+    last2 = prices.groupby("code").tail(2).copy()
+    last2["ma25_prev"] = last2.groupby("code")["ma25"].shift(1)
+    latest = last2.groupby("code").tail(1)
+
     stock_info = store.conn.execute("SELECT code,name,market,marcap FROM stock_info").fetchall()
     stock_df = {row[0]: {"name": row[1], "market": row[2], "marcap": row[3]} for row in stock_info}
     # liquidity filter
@@ -58,6 +62,18 @@ def generate_signals(store: SQLiteStore, settings: Dict) -> List[Dict]:
             break
         market = stock_df.get(row["code"], {}).get("market", "KOSPI")
         buy_th = params.buy_kospi if "KOSPI" in market else params.buy_kosdaq
+
+        # trend filter (optional)
+        if getattr(params, "trend_ma25_rising", False):
+            ma25_prev = row.get("ma25_prev")
+            if ma25_prev is None:
+                continue
+            try:
+                if float(row.get("ma25") or 0) <= float(ma25_prev):
+                    continue
+            except Exception:
+                continue
+
         if row["disparity"] <= buy_th:
             qty = int(budget_per_pos // row["close"])
             if qty <= 0:

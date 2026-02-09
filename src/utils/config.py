@@ -115,6 +115,43 @@ def _sub_env(value: str) -> str:
     return _env_pattern.sub(repl, value)
 
 
+def load_kis_keys() -> List[Dict[str, str]]:
+    """Extract all KIS{n} key sets from the 개인정보 file."""
+    path = "개인정보"
+    if not os.path.exists(path):
+        return []
+
+    kv: Dict[str, str] = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key:
+                    kv[key] = value
+    except Exception:
+        return []
+
+    keys = []
+    for i in range(1, 51):
+        app_key = kv.get(f"KIS{i}_KEY")
+        app_secret = kv.get(f"KIS{i}_SECRET")
+        account_no = kv.get(f"KIS{i}_ACCOUNT_NUMBER")
+        account_product = kv.get(f"KIS{i}_ACCOUNT_CODE")
+        if app_key and app_secret:
+            keys.append({
+                "app_key": app_key,
+                "app_secret": app_secret,
+                "account_no": account_no,
+                "account_product": account_product or "01"
+            })
+    return keys
+
+
 def load_yaml(path: str) -> Dict[str, Any]:
     # Populate os.environ from .env and 개인정보 before substitution
     _load_dotenv()

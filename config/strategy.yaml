@@ -1,11 +1,15 @@
 liquidity_rank: 300
-min_amount: 50000000000
+min_amount: 1000000000
 buy:
   kospi_disparity: -0.05
-  kosdaq_disparity: -0.10
+  kosdaq_disparity: -0.20
+  trend_filter:
+    ma25_rising: true
 sell:
-  take_profit_disparity: -0.01
-  stop_loss: -0.05
-  max_holding_days: 3
+  take_profit_disparity: 0.0
+  stop_loss: -0.30
+  max_holding_days: 15
 position:
   max_positions: 10
+report:
+  selection_horizon_days: 1

@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-// 기본: 현재 페이지 오리진, 필요 시 VITE_API_BASE로 덮어쓰기
-const baseURL = import.meta.env.VITE_API_BASE || window.location.origin;
+// 상대 경로 /api 사용 (Nginx 프록시 설정 전제)
+const baseURL = import.meta.env.VITE_API_BASE || '/api';
 const api = axios.create({ baseURL });
 
 export const fetchUniverse = () => api.get('/universe').then(r => r.data);

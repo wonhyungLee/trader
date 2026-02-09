@@ -54,6 +54,6 @@ def signals():
 
 
 if __name__ == '__main__':
-    host = os.getenv("BNFK_API_HOST", "127.0.0.1")
+    host = os.getenv("BNFK_API_HOST", "0.0.0.0")
     port = int(os.getenv("BNFK_API_PORT", "5000"))
     app.run(host=host, port=port)

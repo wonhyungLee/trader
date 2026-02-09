@@ -8,6 +8,8 @@ kis:
   ws_url_paper: "ws://ops.koreainvestment.com:31000"
   app_key: "${KIS_APP_KEY}"
   app_secret: "${KIS_APP_SECRET}"
+  use_hashkey: true
+  hashkey_cache_ttl_sec: 30
   account_no: "${KIS_ACCOUNT_NO}"  # 예: 00000000-01
   custtype: "P"
   token_cache_path: ".cache/kis_token.json"
