@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import logging
 import pandas as pd
 from typing import List, Dict, Any, Optional, Iterable
 from datetime import datetime
@@ -137,6 +138,7 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_daily_price_code_date ON daily_price(code, date);",
     "CREATE INDEX IF NOT EXISTS idx_order_queue_exec_status ON order_queue(exec_date, status);",
     "CREATE INDEX IF NOT EXISTS idx_order_queue_status ON order_queue(status);",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_order_queue_exec_code_side_pending ON order_queue(exec_date, code, side) WHERE status='PENDING';",
     "CREATE INDEX IF NOT EXISTS idx_refill_progress_status ON refill_progress(status);",
     "CREATE INDEX IF NOT EXISTS idx_investor_flow_daily_code_date ON investor_flow_daily(code, date);",
     "CREATE INDEX IF NOT EXISTS idx_program_trade_daily_code_date ON program_trade_daily(code, date);",
@@ -161,7 +163,10 @@ class SQLiteStore:
         for ddl in SCHEMA.values():
             cur.execute(ddl)
         for idx in INDEXES:
-            cur.execute(idx)
+            try:
+                cur.execute(idx)
+            except (sqlite3.IntegrityError, sqlite3.OperationalError) as exc:
+                logging.warning('failed to create index: %s (%s)', idx, exc)
         self.conn.commit()
 
     # ---------- stock_info ----------
@@ -237,6 +242,8 @@ class SQLiteStore:
     # ---------- order_queue ----------
     def add_pending_orders(self, orders: List[Dict[str, Any]], exec_date: str):
         now = datetime.utcnow().isoformat()
+        # Idempotency: 같은 exec_date에 대해 PENDING을 중복 생성하지 않도록 기존 PENDING을 제거 후 재생성한다.
+        self.conn.execute("DELETE FROM order_queue WHERE exec_date=? AND status='PENDING'", (exec_date,))
         rows = []
         for o in orders:
             rows.append(
@@ -298,6 +305,9 @@ class SQLiteStore:
         if "api_resp" in kwargs:
             fields.append("api_resp=?")
             params.append(kwargs["api_resp"])
+        if "cancel_resp" in kwargs:
+            fields.append("cancel_resp=?")
+            params.append(kwargs["cancel_resp"])
         if "sent_at" in kwargs:
             fields.append("sent_at=?")
             params.append(kwargs["sent_at"])
@@ -332,6 +342,36 @@ class SQLiteStore:
     def list_positions(self) -> List[sqlite3.Row]:
         cur = self.conn.execute("SELECT * FROM position_state")
         return cur.fetchall()
+
+    def replace_positions(self, positions: List[Dict[str, Any]], entry_date: str):
+        """잔고 조회 결과를 최종 진실로 보고 position_state를 통째로 재구성한다.
+
+        - qty>0 필터는 호출 측에서 수행하는 것을 권장
+        - 운영 중 유령 포지션(이미 청산된 종목)이 남지 않게 한다
+        """
+        now = datetime.utcnow().isoformat()
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM position_state")
+        rows = []
+        for p in positions:
+            code = p.get('code')
+            if not code:
+                continue
+            rows.append((code, p.get('name',''), int(p.get('qty') or 0), float(p.get('avg_price') or 0), entry_date, now))
+        cur.executemany(
+            """
+            INSERT INTO position_state(code, name, qty, avg_price, entry_date, updated_at)
+            VALUES(?,?,?,?,?,?)
+            ON CONFLICT(code) DO UPDATE SET
+                name=excluded.name,
+                qty=excluded.qty,
+                avg_price=excluded.avg_price,
+                entry_date=excluded.entry_date,
+                updated_at=excluded.updated_at;
+            """,
+            rows,
+        )
+        self.conn.commit()
 
     # ---------- refill_progress ----------
     def get_refill_status(self, code: str) -> Optional[sqlite3.Row]:

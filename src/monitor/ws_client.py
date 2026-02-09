@@ -39,6 +39,8 @@ class KISWebSocketClient:
         self.custtype = self.broker.custtype
         monitor = settings.get("monitor", {}) or {}
         self.tr_id = monitor.get("ws_tr_id", "H0STCNT0")
+        # KIS 권고: 종목 구독/해제 메시지는 과도하게 연속 전송하지 않는다(권장: 0.2초 간격)
+        self.subscribe_interval_sec = float(monitor.get("ws_subscribe_interval_sec", 0.2))
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._send_lock = asyncio.Lock()
         self._action_q: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
@@ -106,6 +108,9 @@ class KISWebSocketClient:
                     await self.unsubscribe(code)
             except Exception as exc:
                 logging.warning("ws send failed %s %s: %s", action, code, exc)
+            finally:
+                # subscribe/unsubscribe 폭주 방지
+                await asyncio.sleep(max(0.2, self.subscribe_interval_sec))
 
     def _handle_trade_payload(self, data_cnt: int, payload: str):
         fields = payload.split("^")
@@ -154,7 +159,8 @@ class KISWebSocketClient:
                 tr_id = obj.get("header", {}).get("tr_id")
                 if tr_id == "PINGPONG":
                     try:
-                        await self._ws.pong(message)
+                        # KIS는 PINGPONG 메시지 payload를 그대로 응답하는 방식을 사용한다.
+                        await self._ws.send(message)
                     except Exception:
                         pass
 
@@ -166,6 +172,8 @@ class KISWebSocketClient:
                 async with websockets.connect(self.url, ping_interval=None) as ws:
                     logging.info("ws connected: %s", self.url)
                     self._ws = ws
+                    # reconnect 시 stale action queue를 비워서 불필요한 unsubscribe/subcribe를 줄인다
+                    self._action_q = asyncio.Queue()
                     # Reset current subs on reconnect; we will resubscribe to targets.
                     self.state.current_subs.clear()
                     await self._apply_targets()

@@ -71,6 +71,37 @@ crontab -e
 05 16 * * 1-5 cd /opt/bnf-k && /opt/bnf-k/venv/bin/python -m src.trader close  >> logs/cron.log 2>&1
 ```
 
+
+## 8.5 실시간 감시(Monitor) 데몬 (선택)
+- `config/settings.yaml`에서 `monitor.enabled: true`로 켜고, `scan_interval_sec`/`max_ws_subs`/`ws_subscribe_interval_sec(기본 0.2초)`를 확인하세요.
+- WS는 **1세션/등록 합산 41건** 제한이 있으니 `max_ws_subs`를 41 이하로 두세요.
+
+systemd 서비스 예시(데몬): `/etc/systemd/system/bnf-k-monitor.service`
+```ini
+[Unit]
+Description=BNF-K Monitor (REST scan + WS dynamic subscription)
+After=network.target
+
+[Service]
+Type=simple
+User=bnf
+WorkingDirectory=/opt/bnf-k
+EnvironmentFile=/opt/bnf-k/.env
+ExecStart=/opt/bnf-k/venv/bin/python -m src.monitor.monitor_main
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+활성화:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now bnf-k-monitor
+sudo systemctl status bnf-k-monitor
+```
+
 ## 9. 서비스(선택) — systemd 단일 서비스 예시
 `/etc/systemd/system/bnf-k.service`
 ```ini

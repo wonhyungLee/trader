@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
 
 import requests
@@ -79,8 +79,13 @@ class KISBroker:
     def ensure_token(self) -> str:
         if not self._token:
             self._load_token_cache()
-        if self._token and self._token_expire and self._token_expire > datetime.utcnow() + timedelta(minutes=5):
-            return self._token
+        # Compare aware datetimes. If _token_expire is naive (from old cache), assume UTC.
+        now = datetime.now(timezone.utc)
+        if self._token and self._token_expire:
+            if self._token_expire.tzinfo is None:
+                self._token_expire = self._token_expire.replace(tzinfo=timezone.utc)
+            if self._token_expire > now + timedelta(minutes=5):
+                return self._token
         token, exp = self.issue_token()
         self._save_token_cache(token, exp)
         return token
@@ -97,7 +102,7 @@ class KISBroker:
         data = resp.json()
         token = data.get("access_token") or data.get("access_token_token") or data.get("approval_key")
         exp_sec = int(data.get("expires_in", 3600))
-        expires_at = datetime.utcnow() + timedelta(seconds=exp_sec)
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=exp_sec)
         return token, expires_at
 
     def issue_ws_approval(self) -> str:

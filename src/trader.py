@@ -51,7 +51,11 @@ def generate_signals(store: SQLiteStore, settings: Dict) -> List[Dict]:
     orders: List[Dict] = []
     budget_per_pos = float(settings.get("trading", {}).get("order_value", 1_000_000))
 
+    # 운영 포지션 상한(실전/백테스트 정합성). trading.max_positions가 없으면 backtest.max_positions를 사용.
+    max_positions = int(settings.get("trading", {}).get("max_positions") or settings.get("backtest", {}).get("max_positions", 10))
     for _, row in latest.iterrows():
+        if len(orders) >= max_positions:
+            break
         market = stock_df.get(row["code"], {}).get("market", "KOSPI")
         buy_th = params.buy_kospi if "KOSPI" in market else params.buy_kosdaq
         if row["disparity"] <= buy_th:
@@ -147,13 +151,17 @@ def cmd_sync(store: SQLiteStore, settings: Dict, broker: KISBroker):
     # reconcile positions from balance
     bal = broker.get_balance()
     pos_list = bal.get("output1") or []
+    positions = []
     for p in pos_list:
         code = p.get("pdno") or p.get("PDNO")
         name = p.get("prdt_name") or p.get("PRDT_NAME") or ""
         qty = int(float(p.get("hldg_qty") or p.get("HLDG_QTY") or 0))
         avg_price = float(p.get("pchs_avg_pric") or p.get("PCHS_AVG_PRIC") or 0)
         if qty > 0 and code:
-            store.upsert_position(code, name, qty, avg_price, today)
+            positions.append({"code": code, "name": name, "qty": qty, "avg_price": avg_price})
+
+    # 최종 진실은 잔고이므로, position_state를 통째로 재구성(유령 포지션 제거)
+    store.replace_positions(positions, entry_date=today)
     maybe_notify(settings, "[sync] 주문/포지션 동기화 완료")
 
 

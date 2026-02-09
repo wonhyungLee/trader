@@ -11,7 +11,7 @@ kis:
   account_no: "${KIS_ACCOUNT_NO}"  # 예: 00000000-01
   custtype: "P"
   token_cache_path: ".cache/kis_token.json"
-  rate_limit_sleep_sec: 0.10  # prod(20/s) 기준 안전 마진. paper(2/s)에서는 0.50 권장
+  rate_limit_sleep_sec: 0.06
   timeout_connect_sec: 5
   timeout_read_sec: 20
   max_retries: 8
@@ -56,7 +56,6 @@ monitor:
   rest_batch_size: 30
   rest_max_retries: 5
   max_ws_subs: 41
-  ws_subscribe_interval_sec: 0.2  # 구독/해제 메시지 간격(공지 권고에 맞춤)
   subscribe_cooldown_sec: 180
   alert_cooldown_sec: 600
   universe_paths:
