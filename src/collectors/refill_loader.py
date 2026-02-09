@@ -140,6 +140,8 @@ def main():
     settings = load_settings()
     store = SQLiteStore(settings.get("database", {}).get("path", "data/market_data.db"))
     kis_client = KISPriceClient(settings) if args.source == "kis" else None
+    if kis_client:
+        kis_client.broker.reset_sessions()
     sleep = args.cooldown if args.cooldown is not None else (80.0 if args.source == "kis" else args.sleep)
 
     if args.code:

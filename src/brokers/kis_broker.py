@@ -196,6 +196,15 @@ class KISBroker:
     def rotate_session(self):
         self._current_session_idx = (self._current_session_idx + 1) % len(self.sessions)
 
+    def reset_sessions(self):
+        for s in self.sessions:
+            try:
+                s.session.close()
+            except Exception:
+                pass
+            s.session = requests.Session()
+        self._current_session_idx = 0
+
     # Proxy properties for backward compatibility
     @property
     def app_key(self): return self.current_session.app_key
@@ -320,41 +329,6 @@ class KISBroker:
             if attempt < retries:
                 delay = sleep_backoff(attempt, self.backoff_base, self.backoff_cap, self.backoff_jitter)
                 logging.warning("KIS retry %s/%s in %.1fs (%s) using key %s", attempt, retries, delay, tr_id, sess.app_key[:8])
-
-        if last_exc:
-            raise last_exc
-        raise RuntimeError("request failed")
-
-                resp.raise_for_status()
-                self._consecutive_errors = 0
-                try:
-                    return resp.json()
-                except Exception:
-                    return {"text": resp.text}
-            except HTTPError as exc:
-                status = exc.response.status_code if getattr(exc, "response", None) else None
-                if not is_retryable_status(status):
-                    raise
-                last_exc = exc
-            except RequestException as exc:
-                last_exc = exc
-
-            self._consecutive_errors += 1
-            if (
-                self.consecutive_error_cooldown_after > 0
-                and self._consecutive_errors >= self.consecutive_error_cooldown_after
-            ):
-                logging.warning(
-                    "KIS consecutive errors=%s, cooldown %.1fs",
-                    self._consecutive_errors,
-                    self.consecutive_error_cooldown_sec,
-                )
-                time.sleep(self.consecutive_error_cooldown_sec)
-                self._consecutive_errors = 0
-
-            if attempt < retries:
-                delay = sleep_backoff(attempt, self.backoff_base, self.backoff_cap, self.backoff_jitter)
-                logging.warning("KIS retry %s/%s in %.1fs (%s)", attempt, retries, delay, tr_id)
 
         if last_exc:
             raise last_exc

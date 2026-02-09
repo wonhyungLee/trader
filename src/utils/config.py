@@ -1,7 +1,7 @@
 import os
 import re
 import yaml
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 
 _env_pattern = re.compile(r"\${([^}]+)}")

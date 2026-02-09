@@ -19,8 +19,30 @@ h1 { margin: 0; font-size: 24px; }
 .name { color: #334155; }
 .mkt { font-size: 12px; color: #475569; text-align: right; }
 .chart { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; min-height: 360px; display: flex; flex-direction: column; gap: 12px; }
+.status { border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; background: #f8fafc; }
+.status-title { font-weight: 700; margin-bottom: 8px; }
+.status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.status-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; }
+.status-card .label { font-size: 12px; color: #64748b; margin-bottom: 4px; }
+.status-card .value { font-size: 13px; color: #0f172a; }
+.status-card .value.ok { color: #16a34a; font-weight: 600; }
 .placeholder { color: #94a3b8; padding: 24px; }
 .signals { border-top: 1px solid #e2e8f0; padding-top: 8px; }
 .signals-header { font-weight: 700; margin-bottom: 6px; }
 .signals-body { max-height: 180px; overflow: auto; }
 .signal-row { display: grid; grid-template-columns: 120px 80px 70px 60px; font-size: 13px; padding: 4px 0; border-bottom: 1px dashed #e2e8f0; }
+.price-table { border-top: 1px solid #e2e8f0; padding-top: 8px; }
+.price-table-title { font-weight: 700; margin-bottom: 6px; }
+.table-grid { display: grid; grid-template-columns: repeat(7, minmax(80px, 1fr)); gap: 2px; max-height: 260px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; }
+.table-head { font-weight: 700; font-size: 12px; background: #f1f5f9; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
+.table-row { display: contents; }
+.table-row > div { padding: 6px 8px; font-size: 12px; border-bottom: 1px solid #f1f5f9; }
+.panel { border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; background: #fff; }
+.panel-title { font-weight: 700; margin-bottom: 6px; }
+.kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.kv { display: flex; justify-content: space-between; font-size: 12px; padding: 6px 8px; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc; }
+.kv span { color: #475569; }
+.table-compact { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 2px; max-height: 260px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; }
+.t-head { font-weight: 700; font-size: 12px; background: #f1f5f9; padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
+.t-row { display: contents; }
+.t-row > div { padding: 6px 8px; font-size: 12px; border-bottom: 1px solid #f1f5f9; }

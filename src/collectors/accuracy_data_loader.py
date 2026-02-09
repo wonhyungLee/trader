@@ -354,7 +354,7 @@ def main():
     parser.add_argument("--start-index", type=int, default=0, help="이미 처리된 종목 수(0-based skip count)")
     parser.add_argument("--resume", action="store_true", help="progress 파일 기준으로 이어서 수행")
     parser.add_argument("--notify-every", type=int, default=1, help="n개 종목마다 진행 알림")
-    parser.add_argument("--sleep", type=float, default=0.2, help="종목 처리 간 슬립(초)")
+    parser.add_argument("--sleep", type=float, default=None, help="종목 처리 간 슬립(초)")
     parser.add_argument("--rate-sleep", type=float, default=None, help="요청 간 슬립(초). 설정 시 KIS rate_limit_sleep_sec를 덮어씀")
     parser.add_argument("--limit", type=int, default=None, help="처리할 종목 수 제한(테스트)")
     args = parser.parse_args()
@@ -364,6 +364,10 @@ def main():
     broker = KISBroker(settings)
     if args.rate_sleep is not None:
         broker.rate_limit_sleep = float(args.rate_sleep)
+    else:
+        broker.rate_limit_sleep = float(
+            settings.get("kis", {}).get("accuracy_rate_limit_sleep_sec", broker.rate_limit_sleep)
+        )
     all_codes = load_codes(store)
     progress_path = Path("data/accuracy_progress.json")
     if args.resume:
@@ -515,8 +519,11 @@ def main():
                     "updated_at": datetime.utcnow().isoformat(),
                 },
             )
-            if args.sleep and args.sleep > 0:
-                time.sleep(args.sleep)
+    item_sleep = args.sleep
+    if item_sleep is None:
+        item_sleep = float(settings.get("kis", {}).get("accuracy_item_sleep_sec", 0.1))
+    if item_sleep and item_sleep > 0:
+        time.sleep(item_sleep)
     finally:
         try:
             lock_path.unlink()

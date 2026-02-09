@@ -23,6 +23,8 @@ kis:
   consecutive_error_cooldown_after: 10
   consecutive_error_cooldown_sec: 180
   session_reset_every: 3
+  accuracy_rate_limit_sleep_sec: 0.06
+  accuracy_item_sleep_sec: 0.1
 
 logging:
   level: "INFO"

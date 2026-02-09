@@ -7,7 +7,7 @@ def send_telegram(bot_token: str, chat_id: str, text: str, parse_mode: str = "Ma
     if not bot_token or not chat_id:
         return False
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    resp = requests.post(url, data={"chat_id": chat_id, "text": text, "parse_mode": parse_mode})
+    resp = requests.post(url, data={"chat_id": chat_id, "text": text, "parse_mode": parse_mode}, timeout=5)
     if not resp.ok:
         logging.warning("telegram send failed: %s", resp.text)
         return False
@@ -19,7 +19,7 @@ def maybe_notify(settings: dict, message: str):
     dc = settings.get("discord", {})
     if dc and dc.get("enabled") and dc.get("webhook"):
         try:
-            resp = requests.post(dc["webhook"], json={"content": message})
+            resp = requests.post(dc["webhook"], json={"content": message}, timeout=5)
             if not resp.ok:
                 logging.warning("discord send failed: %s", resp.text)
         except Exception:
