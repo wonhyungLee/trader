@@ -367,7 +367,7 @@ class KISBroker:
     def send_order(self, code: str, side: str, qty: int, price: Optional[float] = None, ord_dvsn: str = "01") -> Dict[str, Any]:
         # side: BUY/SELL
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-cash"
-        tr_id = self._tr_id("VTTC0802U", "TTTC0802U") if side.upper() == "BUY" else self._tr_id("VTTC0801U", "TTTC0801U")
+        tr_id = self._tr_id("VTTC0012U", "TTTC0012U") if side.upper() == "BUY" else self._tr_id("VTTC0011U", "TTTC0011U")
         body = {
             "CANO": self.account_no,
             "ACNT_PRDT_CD": self.account_product,
@@ -381,7 +381,7 @@ class KISBroker:
 
     def cancel_order(self, code: str, qty: int, orgn_odno: str, ord_orgno: str, ord_dvsn: str = "01") -> Dict[str, Any]:
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-rvsecncl"
-        tr_id = self._tr_id("VTTC0803U", "TTTC0803U")
+        tr_id = self._tr_id("VTTC0013U", "TTTC0013U")
         body = {
             "CANO": self.account_no,
             "ACNT_PRDT_CD": self.account_product,
@@ -397,7 +397,7 @@ class KISBroker:
 
     def get_orders(self, start_date: str, end_date: str) -> Dict[str, Any]:
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
-        tr_id = self._tr_id("VTTC8001R", "TTTC8001R")
+        tr_id = self._tr_id("VTTC0081R", "TTTC0081R")
         params = {
             "CANO": self.account_no,
             "ACNT_PRDT_CD": self.account_product,
