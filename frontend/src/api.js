@@ -17,6 +17,7 @@ export const fetchPositions = () => api.get('/positions').then(r => r.data);
 export const fetchPortfolio = () => api.get('/portfolio').then(r => r.data);
 export const fetchPlans = () => api.get('/plans').then(r => r.data);
 export const fetchAccount = () => api.get('/account').then(r => r.data);
+export const fetchSelection = () => api.get('/selection').then(r => r.data);
 export const fetchStrategy = () => api.get('/strategy').then(r => r.data);
 export const fetchJobs = () => api.get('/jobs').then(r => r.data);
 export const triggerExport = () => api.post('/export').then(r => r.data);

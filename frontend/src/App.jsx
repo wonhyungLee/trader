@@ -11,6 +11,7 @@ import {
   fetchPortfolio,
   fetchPlans,
   fetchAccount,
+  fetchSelection,
   fetchStrategy,
   fetchJobs
 } from './api'
@@ -83,6 +84,7 @@ function App() {
   const [portfolio, setPortfolio] = useState({ positions: [], totals: {} })
   const [plans, setPlans] = useState({ buys: [], sells: [], exec_date: null })
   const [account, setAccount] = useState(null)
+  const [selection, setSelection] = useState({ stages: [], candidates: [], pricing: {} })
   const [strategy, setStrategy] = useState(null)
   const [jobs, setJobs] = useState([])
   const [sectors, setSectors] = useState([])
@@ -102,6 +104,7 @@ function App() {
     fetchPortfolio().then(setPortfolio)
     fetchPlans().then(setPlans)
     fetchAccount().then(setAccount)
+    fetchSelection().then(setSelection)
     fetchStrategy().then(setStrategy)
     fetchJobs().then(setJobs)
     setLastUpdated(new Date())
@@ -174,6 +177,22 @@ function App() {
   const sinceConnected = account?.since_connected || {}
   const portfolioPositions = portfolio?.positions || []
   const portfolioTotals = portfolio?.totals || {}
+  const selectionStages = selection?.stages || []
+  const selectionCandidates = selection?.candidates || []
+  const selectionPricing = selection?.pricing || {}
+
+  const formatStageValue = (stage) => {
+    if (!stage) return '-'
+    if (stage.key === 'min_amount') return formatCurrency(stage.value)
+    if (stage.key === 'liquidity') return `Top ${stage.value}`
+    if (stage.key === 'final') return `Max ${stage.value}`
+    if (stage.key === 'disparity' && stage.value) {
+      const k = formatPct((stage.value.kospi || 0) * 100)
+      const q = formatPct((stage.value.kosdaq || 0) * 100)
+      return `KOSPI ${k} · KOSDAQ ${q}`
+    }
+    return stage.value ?? '-'
+  }
 
   const lastDate = status?.daily_price?.date?.max
   const refreshLabel = lastUpdated
@@ -677,6 +696,65 @@ function App() {
             <span className={portfolioTotals.pnl >= 0 ? 'up' : 'down'}>
               {formatCurrency(portfolioTotals.pnl)} ({formatPct(portfolioTotals.pnl_pct)})
             </span>
+          </div>
+        </div>
+
+        <div className="panel soft">
+          <div className="panel-title">Selection Pipeline</div>
+          <div className="pipeline-flow">
+            {selectionStages.map((stage, idx) => (
+              <div key={stage.key} className="pipeline-step">
+                <div className="pipeline-label">{stage.label}</div>
+                <div className="pipeline-count">{stage.count}</div>
+                <div className="pipeline-value">{formatStageValue(stage)}</div>
+                {idx < selectionStages.length - 1 && <div className="pipeline-arrow">→</div>}
+              </div>
+            ))}
+            {selectionStages.length === 0 && <div className="empty">선정 파이프라인 데이터를 불러오지 못했습니다.</div>}
+          </div>
+
+          <div className="pricing-box">
+            <div className="pricing-title">Price Decision Logic</div>
+            <div className="pricing-grid">
+              <div>
+                <span>Price Source</span>
+                <strong>{selectionPricing.price_source || 'close'}</strong>
+              </div>
+              <div>
+                <span>Order Value</span>
+                <strong>{formatCurrency(selectionPricing.order_value)}</strong>
+              </div>
+              <div>
+                <span>Qty Formula</span>
+                <strong>{selectionPricing.qty_formula || 'order_value / close'}</strong>
+              </div>
+              <div>
+                <span>Order Type</span>
+                <strong>{selectionPricing.ord_dvsn || '-'}</strong>
+              </div>
+            </div>
+          </div>
+
+          <div className="candidate-table">
+            <div className="candidate-row head">
+              <span>Rank</span>
+              <span>Code</span>
+              <span>Name</span>
+              <span>Amount</span>
+              <span>Disparity</span>
+              <span>Close</span>
+            </div>
+            {selectionCandidates.slice(0, 12).map((row) => (
+              <div key={row.code} className="candidate-row">
+                <span>{row.rank}</span>
+                <span className="mono">{row.code}</span>
+                <span>{row.name}</span>
+                <span>{formatCurrency(row.amount)}</span>
+                <span className={row.disparity <= 0 ? 'down' : 'up'}>{formatPct((row.disparity || 0) * 100)}</span>
+                <span>{formatCurrency(row.close)}</span>
+              </div>
+            ))}
+            {selectionCandidates.length === 0 && <div className="empty">현재 선정된 후보가 없습니다.</div>}
           </div>
         </div>
       </section>

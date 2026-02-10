@@ -855,6 +855,112 @@ body {
   color: var(--accent-3);
 }
 
+.pipeline-flow {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.pipeline-step {
+  position: relative;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.pipeline-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.pipeline-count {
+  font-size: 18px;
+  font-weight: 700;
+  margin-top: 6px;
+}
+
+.pipeline-value {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.pipeline-arrow {
+  position: absolute;
+  right: 14px;
+  top: 12px;
+  color: var(--accent);
+  font-size: 14px;
+}
+
+.pricing-box {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.65);
+  margin-bottom: 16px;
+}
+
+.pricing-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  font-size: 12px;
+}
+
+.pricing-grid span {
+  color: var(--text-muted);
+}
+
+.pricing-grid strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.candidate-table {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  max-height: 280px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.candidate-row {
+  display: grid;
+  grid-template-columns: 40px 70px 1.2fr 110px 90px 90px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.7);
+  min-width: 620px;
+}
+
+.candidate-row.head {
+  position: sticky;
+  top: 0;
+  background: rgba(15, 23, 42, 0.95);
+  border-color: rgba(148, 163, 184, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  color: var(--text-muted);
+  z-index: 1;
+}
+
 .empty {
   color: var(--text-muted);
   text-align: center;
@@ -922,5 +1028,8 @@ body {
   }
   .portfolio-row {
     min-width: 620px;
+  }
+  .candidate-row {
+    min-width: 560px;
   }
 }

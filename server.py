@@ -16,6 +16,7 @@ from flask_cors import CORS
 
 from src.utils.config import load_settings
 from src.utils.db_exporter import maybe_export_db
+from src.analyzer.backtest_runner import load_strategy
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -24,6 +25,7 @@ DB_PATH = Path('data/market_data.db')
 FRONTEND_DIST = Path('frontend/dist')
 ACCOUNT_SNAPSHOT_PATH = Path('data/account_snapshot.json')
 _balance_cache: Dict[str, Any] = {"ts": 0.0, "data": None}
+_selection_cache: Dict[str, Any] = {"ts": 0.0, "data": None}
 
 app = Flask(__name__, static_folder=str(FRONTEND_DIST), static_url_path='')
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -239,6 +241,106 @@ def _build_account_summary(conn: sqlite3.Connection, settings: Dict[str, Any]) -
         },
     }
     _balance_cache.update({"ts": now_ts, "data": data})
+    return data
+
+
+def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any]) -> Dict[str, Any]:
+    now_ts = time.time()
+    if _selection_cache.get("data") and now_ts - _selection_cache.get("ts", 0) < 120:
+        return _selection_cache["data"]
+
+    params = load_strategy(settings)
+    min_amount = float(getattr(params, "min_amount", 0) or 0)
+    liquidity_rank = int(getattr(params, "liquidity_rank", 0) or 0)
+    buy_kospi = float(getattr(params, "buy_kospi", 0) or 0)
+    buy_kosdaq = float(getattr(params, "buy_kosdaq", 0) or 0)
+    max_positions = int(settings.get("trading", {}).get("max_positions") or getattr(params, "max_positions", 10))
+    trend_filter = bool(getattr(params, "trend_ma25_rising", False))
+
+    universe = pd.read_sql_query("SELECT code, name, market FROM universe_members", conn)
+    codes = universe["code"].dropna().astype(str).tolist()
+    if not codes:
+        data = {"date": None, "stages": [], "candidates": [], "summary": {"total": 0}}
+        _selection_cache.update({"ts": now_ts, "data": data})
+        return data
+
+    placeholder = ",".join("?" * len(codes))
+    sql = f"""
+        SELECT code, date, close, amount, ma25, disparity
+        FROM (
+            SELECT code, date, close, amount, ma25, disparity,
+                   ROW_NUMBER() OVER (PARTITION BY code ORDER BY date DESC) AS rn
+            FROM daily_price
+            WHERE code IN ({placeholder})
+        )
+        WHERE rn <= 2
+    """
+    df = pd.read_sql_query(sql, conn, params=codes)
+    if df.empty:
+        data = {"date": None, "stages": [], "candidates": [], "summary": {"total": len(codes)}}
+        _selection_cache.update({"ts": now_ts, "data": data})
+        return data
+
+    df = df.sort_values(["code", "date"])
+    last2 = df.groupby("code").tail(2).copy()
+    last2["ma25_prev"] = last2.groupby("code")["ma25"].shift(1)
+    latest = last2.groupby("code").tail(1).copy()
+    latest = latest.merge(universe, on="code", how="left")
+
+    total = len(latest)
+    stage_min = latest[latest["amount"] >= min_amount] if min_amount else latest
+    stage_liq = stage_min.sort_values("amount", ascending=False)
+    if liquidity_rank:
+        stage_liq = stage_liq.head(liquidity_rank)
+
+    def _pass_disparity(row) -> bool:
+        market = row.get("market") or "KOSPI"
+        threshold = buy_kospi if "KOSPI" in market else buy_kosdaq
+        try:
+            return float(row.get("disparity") or 0) <= threshold
+        except Exception:
+            return False
+
+    stage_disp = stage_liq[stage_liq.apply(_pass_disparity, axis=1)]
+    if trend_filter:
+        stage_disp = stage_disp[stage_disp["ma25_prev"].notna() & (stage_disp["ma25"] > stage_disp["ma25_prev"])]
+
+    final = stage_disp.sort_values("amount", ascending=False).head(max_positions).copy()
+    final["rank"] = range(1, len(final) + 1) if not final.empty else []
+
+    sector = pd.read_sql_query("SELECT code, sector_name, industry_name FROM sector_map", conn)
+    final = final.merge(sector, on="code", how="left")
+
+    latest_date = latest["date"].max()
+    candidates = final[["code", "name", "market", "amount", "close", "disparity", "rank", "sector_name", "industry_name"]].fillna("").to_dict(orient="records")
+
+    stages = [
+        {"key": "universe", "label": "Universe", "count": total, "value": len(codes)},
+        {"key": "min_amount", "label": "Amount Filter", "count": len(stage_min), "value": min_amount},
+        {"key": "liquidity", "label": "Liquidity Rank", "count": len(stage_liq), "value": liquidity_rank},
+        {"key": "disparity", "label": "Disparity Threshold", "count": len(stage_disp), "value": {"kospi": buy_kospi, "kosdaq": buy_kosdaq}},
+        {"key": "final", "label": "Max Positions", "count": len(final), "value": max_positions},
+    ]
+
+    pricing = {
+        "price_source": "close",
+        "order_value": settings.get("trading", {}).get("order_value"),
+        "qty_formula": "order_value / close",
+        "ord_dvsn": settings.get("trading", {}).get("ord_dvsn"),
+    }
+
+    data = {
+        "date": latest_date,
+        "stages": stages,
+        "candidates": candidates,
+        "summary": {
+            "total": total,
+            "final": len(final),
+            "trend_filter": trend_filter,
+        },
+        "pricing": pricing,
+    }
+    _selection_cache.update({"ts": now_ts, "data": data})
     return data
 
 def _read_accuracy_lock() -> dict:
@@ -491,6 +593,13 @@ def account():
     settings = load_settings()
     return jsonify(_build_account_summary(conn, settings))
 
+
+@app.get('/selection')
+def selection():
+    conn = get_conn()
+    settings = load_settings()
+    return jsonify(_build_selection_summary(conn, settings))
+
 @app.get('/status')
 def status():
     conn = get_conn()
@@ -592,6 +701,7 @@ def _register_bnf_aliases():
         ("/portfolio", portfolio, ["GET"]),
         ("/plans", plans, ["GET"]),
         ("/account", account, ["GET"]),
+        ("/selection", selection, ["GET"]),
         ("/status", status, ["GET"]),
         ("/jobs", jobs, ["GET"]),
         ("/engines", engines, ["GET"]),
