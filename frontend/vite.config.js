@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: '/bnf/', // 서브패스 설정
+  base: './', // 서브패스/루트 모두 대응하도록 상대 경로 사용
   server: {
     host: '0.0.0.0',
     port: 5173,

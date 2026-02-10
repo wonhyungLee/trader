@@ -1,8 +1,9 @@
 import axios from 'axios';
 
 // Vite 프록시 또는 Nginx 설정에 맞춰 /api 접두사 사용 여부 결정
-// 현재 server.py가 직접 루트에서 제공하므로 baseURL을 /bnf로 설정 (Nginx 프록시용)
-const baseURL = import.meta.env.VITE_API_BASE || '/bnf';
+// /bnf 또는 루트 둘 다 대응하도록 현재 경로 기반으로 기본값 결정
+const inferredBase = window.location.pathname.startsWith('/bnf') ? '/bnf' : '';
+const baseURL = import.meta.env.VITE_API_BASE ? import.meta.env.VITE_API_BASE : inferredBase;
 const api = axios.create({ baseURL });
 
 export const fetchUniverse = (sector) => api.get('/universe', { params: sector ? { sector } : {} }).then(r => r.data);
