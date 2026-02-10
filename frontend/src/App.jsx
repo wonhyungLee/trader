@@ -76,6 +76,8 @@ const formatTime = (value) => {
   return ts
 }
 
+const asArray = (value) => (Array.isArray(value) ? value : [])
+
 function App() {
   const [universe, setUniverse] = useState([])
   const [filter, setFilter] = useState('KOSPI100')
@@ -103,19 +105,46 @@ function App() {
 
   const loadData = (sectorOverride) => {
     const sector = typeof sectorOverride === 'string' ? sectorOverride : sectorFilter
-    fetchUniverse(sector && sector !== 'ALL' ? sector : undefined).then(setUniverse)
-    fetchSectors().then(setSectors)
-    fetchSignals().then(setSignals)
-    fetchStatus().then(setStatus)
-    fetchEngines().then(setEngines)
-    fetchOrders().then(setOrders)
-    fetchPositions().then(setPositions)
-    fetchPortfolio().then(setPortfolio)
-    fetchPlans().then(setPlans)
-    fetchAccount().then(setAccount)
-    fetchSelection().then(setSelection)
-    fetchStrategy().then(setStrategy)
-    fetchJobs().then(setJobs)
+    fetchUniverse(sector && sector !== 'ALL' ? sector : undefined).then((data) => setUniverse(asArray(data)))
+    fetchSectors().then((data) => setSectors(asArray(data)))
+    fetchSignals().then((data) => setSignals(asArray(data)))
+    fetchStatus().then((data) => setStatus(data && typeof data === 'object' ? data : null))
+    fetchEngines().then((data) => setEngines(data && typeof data === 'object' ? data : null))
+    fetchOrders().then((data) => setOrders(asArray(data)))
+    fetchPositions().then((data) => setPositions(asArray(data)))
+    fetchPortfolio().then((data) => {
+      const payload = data && typeof data === 'object' ? data : {}
+      setPortfolio({
+        positions: asArray(payload.positions),
+        totals: payload.totals && typeof payload.totals === 'object' ? payload.totals : {},
+      })
+    })
+    fetchPlans().then((data) => {
+      const payload = data && typeof data === 'object' ? data : {}
+      const buys = asArray(payload.buys)
+      const sells = asArray(payload.sells)
+      setPlans({
+        ...payload,
+        buys,
+        sells,
+        counts: payload.counts && typeof payload.counts === 'object'
+          ? payload.counts
+          : { buys: buys.length, sells: sells.length },
+      })
+    })
+    fetchAccount().then((data) => setAccount(data && typeof data === 'object' ? data : null))
+    fetchSelection().then((data) => {
+      const payload = data && typeof data === 'object' ? data : {}
+      setSelection({
+        ...payload,
+        stages: asArray(payload.stages),
+        candidates: asArray(payload.candidates),
+        pricing: payload.pricing && typeof payload.pricing === 'object' ? payload.pricing : {},
+        stage_items: payload.stage_items && typeof payload.stage_items === 'object' ? payload.stage_items : {},
+      })
+    })
+    fetchStrategy().then((data) => setStrategy(data && typeof data === 'object' ? data : null))
+    fetchJobs().then((data) => setJobs(asArray(data)))
     setLastUpdated(new Date())
   }
 
@@ -156,7 +185,7 @@ function App() {
   }, [selection, activeStage])
 
   const filtered = useMemo(() => {
-    const target = universe.filter(u => u.group === filter)
+    const target = asArray(universe).filter(u => u.group === filter)
     const keyword = search.trim().toLowerCase()
     if (!keyword) return target
     return target.filter(u =>
@@ -168,7 +197,7 @@ function App() {
 
   const marketFilter = filter === 'KOSPI100' ? 'KOSPI' : 'KOSDAQ'
   const sectorOptions = useMemo(
-    () => sectors.filter(s => s.market === marketFilter).sort((a, b) => b.count - a.count),
+    () => asArray(sectors).filter(s => s.market === marketFilter).sort((a, b) => b.count - a.count),
     [sectors, marketFilter]
   )
 
@@ -188,18 +217,19 @@ function App() {
     { label: 'VI', value: accuracy.vi_status_daily?.missing_codes || 0 }
   ]
 
-  const planBuys = plans?.buys || []
-  const planSells = plans?.sells || []
+  const planBuys = asArray(plans?.buys)
+  const planSells = asArray(plans?.sells)
   const accountSummary = account?.summary || {}
   const sinceConnected = account?.since_connected || {}
-  const portfolioPositions = portfolio?.positions || []
+  const portfolioPositions = asArray(portfolio?.positions)
   const portfolioTotals = portfolio?.totals || {}
-  const selectionStages = selection?.stages || []
-  const selectionCandidates = selection?.candidates || []
+  const selectionStages = asArray(selection?.stages)
+  const selectionCandidates = asArray(selection?.candidates)
   const selectionPricing = selection?.pricing || {}
-  const selectionStageItems = selection?.stage_items || {}
+  const selectionStageItems = selection?.stage_items && typeof selection.stage_items === 'object' ? selection.stage_items : {}
   const scanMode = selection?.mode || 'DAILY'
   const scanModeReason = selection?.mode_reason
+  const activeStageItems = asArray(selectionStageItems[activeStage])
 
   const formatStageValue = (stage) => {
     if (!stage) return '-'
@@ -476,7 +506,7 @@ function App() {
                   <span>Disparity</span>
                   <span>Close</span>
                 </div>
-                {(selectionStageItems[activeStage] || []).slice(0, 12).map((row) => (
+                {activeStageItems.slice(0, 12).map((row) => (
                   <div key={`${activeStage}-${row.code}`} className="stage-row">
                     <span className="mono">{row.code}</span>
                     <span>{row.name}</span>
@@ -485,7 +515,7 @@ function App() {
                     <span>{formatCurrency(row.close)}</span>
                   </div>
                 ))}
-                {(selectionStageItems[activeStage] || []).length === 0 && (
+                {activeStageItems.length === 0 && (
                   <div className="empty">해당 단계에 표시할 종목이 없습니다.</div>
                 )}
               </div>
