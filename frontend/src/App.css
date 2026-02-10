@@ -863,10 +863,18 @@ body {
 
 .pipeline-step {
   position: relative;
-  padding: 12px 14px;
+  padding: 12px 14px 14px;
   border-radius: 12px;
   border: 1px solid var(--line);
   background: rgba(15, 23, 42, 0.7);
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+.pipeline-step.active {
+  border-color: rgba(34, 211, 238, 0.6);
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.35) inset;
 }
 
 .pipeline-label {
@@ -894,6 +902,20 @@ body {
   top: 12px;
   color: var(--accent);
   font-size: 14px;
+}
+
+.pipeline-bar {
+  margin-top: 10px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.2);
+  overflow: hidden;
+}
+
+.pipeline-bar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
 }
 
 .pricing-box {
@@ -950,6 +972,48 @@ body {
 }
 
 .candidate-row.head {
+  position: sticky;
+  top: 0;
+  background: rgba(15, 23, 42, 0.95);
+  border-color: rgba(148, 163, 184, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  color: var(--text-muted);
+  z-index: 1;
+}
+
+.stage-table {
+  margin-top: 16px;
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.stage-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.stage-row {
+  display: grid;
+  grid-template-columns: 70px 1.2fr 110px 90px 90px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.7);
+  min-width: 580px;
+}
+
+.stage-row.head {
   position: sticky;
   top: 0;
   background: rgba(15, 23, 42, 0.95);
@@ -1031,5 +1095,8 @@ body {
   }
   .candidate-row {
     min-width: 560px;
+  }
+  .stage-row {
+    min-width: 520px;
   }
 }

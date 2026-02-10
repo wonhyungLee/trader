@@ -85,6 +85,7 @@ function App() {
   const [plans, setPlans] = useState({ buys: [], sells: [], exec_date: null })
   const [account, setAccount] = useState(null)
   const [selection, setSelection] = useState({ stages: [], candidates: [], pricing: {} })
+  const [activeStage, setActiveStage] = useState('final')
   const [strategy, setStrategy] = useState(null)
   const [jobs, setJobs] = useState([])
   const [sectors, setSectors] = useState([])
@@ -138,6 +139,13 @@ function App() {
     setSelected(null)
   }, [sectorFilter])
 
+  useEffect(() => {
+    if (!selectionStageItems || Object.keys(selectionStageItems).length === 0) return
+    if (!selectionStageItems[activeStage]) {
+      setActiveStage('final')
+    }
+  }, [selectionStageItems, activeStage])
+
   const filtered = useMemo(() => {
     const target = universe.filter(u => u.group === filter)
     const keyword = search.trim().toLowerCase()
@@ -180,6 +188,7 @@ function App() {
   const selectionStages = selection?.stages || []
   const selectionCandidates = selection?.candidates || []
   const selectionPricing = selection?.pricing || {}
+  const selectionStageItems = selection?.stage_items || {}
 
   const formatStageValue = (stage) => {
     if (!stage) return '-'
@@ -702,14 +711,25 @@ function App() {
         <div className="panel soft">
           <div className="panel-title">Selection Pipeline</div>
           <div className="pipeline-flow">
-            {selectionStages.map((stage, idx) => (
-              <div key={stage.key} className="pipeline-step">
-                <div className="pipeline-label">{stage.label}</div>
-                <div className="pipeline-count">{stage.count}</div>
-                <div className="pipeline-value">{formatStageValue(stage)}</div>
-                {idx < selectionStages.length - 1 && <div className="pipeline-arrow">→</div>}
-              </div>
-            ))}
+            {selectionStages.map((stage, idx) => {
+              const isActive = activeStage === stage.key
+              return (
+                <button
+                  key={stage.key}
+                  className={`pipeline-step ${isActive ? 'active' : ''}`}
+                  onClick={() => setActiveStage(stage.key)}
+                  type="button"
+                >
+                  <div className="pipeline-label">{stage.label}</div>
+                  <div className="pipeline-count">{stage.count}</div>
+                  <div className="pipeline-value">{formatStageValue(stage)}</div>
+                  <div className="pipeline-bar">
+                    <span style={{ width: selectionStages[0]?.count ? `${(stage.count / selectionStages[0].count) * 100}%` : '0%' }} />
+                  </div>
+                  {idx < selectionStages.length - 1 && <div className="pipeline-arrow">→</div>}
+                </button>
+              )
+            })}
             {selectionStages.length === 0 && <div className="empty">선정 파이프라인 데이터를 불러오지 못했습니다.</div>}
           </div>
 
@@ -731,6 +751,18 @@ function App() {
               <div>
                 <span>Order Type</span>
                 <strong>{selectionPricing.ord_dvsn || '-'}</strong>
+              </div>
+              <div>
+                <span>Sell Take Profit</span>
+                <strong>{formatPct((selectionPricing.sell_rules?.take_profit_disparity || 0) * 100)}</strong>
+              </div>
+              <div>
+                <span>Sell Stop Loss</span>
+                <strong>{formatPct((selectionPricing.sell_rules?.stop_loss || 0) * 100)}</strong>
+              </div>
+              <div>
+                <span>Max Holding</span>
+                <strong>{selectionPricing.sell_rules?.max_holding_days || '-'} days</strong>
               </div>
             </div>
           </div>
@@ -755,6 +787,31 @@ function App() {
               </div>
             ))}
             {selectionCandidates.length === 0 && <div className="empty">현재 선정된 후보가 없습니다.</div>}
+          </div>
+
+          <div className="stage-table">
+            <div className="stage-title">
+              Stage Detail: {selectionStages.find(s => s.key === activeStage)?.label || 'N/A'}
+            </div>
+            <div className="stage-row head">
+              <span>Code</span>
+              <span>Name</span>
+              <span>Amount</span>
+              <span>Disparity</span>
+              <span>Close</span>
+            </div>
+            {(selectionStageItems[activeStage] || []).slice(0, 12).map((row) => (
+              <div key={`${activeStage}-${row.code}`} className="stage-row">
+                <span className="mono">{row.code}</span>
+                <span>{row.name}</span>
+                <span>{formatCurrency(row.amount)}</span>
+                <span className={row.disparity <= 0 ? 'down' : 'up'}>{formatPct((row.disparity || 0) * 100)}</span>
+                <span>{formatCurrency(row.close)}</span>
+              </div>
+            ))}
+            {(selectionStageItems[activeStage] || []).length === 0 && (
+              <div className="empty">해당 단계에 표시할 종목이 없습니다.</div>
+            )}
           </div>
         </div>
       </section>

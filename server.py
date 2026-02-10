@@ -311,6 +311,15 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
     sector = pd.read_sql_query("SELECT code, sector_name, industry_name FROM sector_map", conn)
     final = final.merge(sector, on="code", how="left")
 
+    def _pack(df: pd.DataFrame, limit: int = 50) -> list[dict]:
+        if df is None or df.empty:
+            return []
+        cols = [c for c in ["code", "name", "market", "amount", "close", "disparity"] if c in df.columns]
+        out = df[cols].copy()
+        if "amount" in out.columns:
+            out = out.sort_values("amount", ascending=False)
+        return out.head(limit).fillna("").to_dict(orient="records")
+
     latest_date = latest["date"].max()
     candidates = final[["code", "name", "market", "amount", "close", "disparity", "rank", "sector_name", "industry_name"]].fillna("").to_dict(orient="records")
 
@@ -327,12 +336,24 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
         "order_value": settings.get("trading", {}).get("order_value"),
         "qty_formula": "order_value / close",
         "ord_dvsn": settings.get("trading", {}).get("ord_dvsn"),
+        "buy_thresholds": {"kospi": buy_kospi, "kosdaq": buy_kosdaq},
+        "sell_rules": {
+            "take_profit_disparity": getattr(params, "sell_disparity", None),
+            "stop_loss": getattr(params, "stop_loss", None),
+            "max_holding_days": getattr(params, "max_holding_days", None),
+        },
     }
 
     data = {
         "date": latest_date,
         "stages": stages,
         "candidates": candidates,
+        "stage_items": {
+            "min_amount": _pack(stage_min),
+            "liquidity": _pack(stage_liq),
+            "disparity": _pack(stage_disp),
+            "final": _pack(final),
+        },
         "summary": {
             "total": total,
             "final": len(final),
