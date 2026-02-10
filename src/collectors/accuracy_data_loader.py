@@ -306,7 +306,7 @@ def fetch_credit_balance(broker: KISBroker, code: str, end_ymd: str) -> List[Dic
         output = [output]
     rows = []
     for rec in output:
-        date_raw = rec.get("deal_date") or rec.get("stlm_date")
+        date_raw = rec.get("stlm_date") or rec.get("deal_date") or rec.get("stck_bsop_date")
         rows.append(
             {
                 "date": _normalize_date(date_raw),
@@ -502,27 +502,28 @@ def main():
             done_global = args.start_index + done
             try:
                 code_end = _clamp_ymd(last_date_map.get(code, end_ymd), end_ymd)
+                code_start = start_ymd if start_ymd <= code_end else code_end
                 inv_rows, inv_err = _safe_fetch(
                     "investor_flow",
-                    lambda: filter_rows(fetch_investor_flow(broker, code, code_end), start_ymd, code_end),
+                    lambda: filter_rows(fetch_investor_flow(broker, code, code_end), code_start, code_end),
                 )
                 prog_rows, prog_err = _safe_fetch(
                     "program_trade",
-                    lambda: filter_rows(fetch_program_trade(broker, code, code_end), start_ymd, code_end),
+                    lambda: filter_rows(fetch_program_trade(broker, code, code_end), code_start, code_end),
                 )
                 short_rows, short_err = _safe_fetch(
                     "short_sale",
-                    lambda: filter_rows(fetch_short_sale(broker, code, start_ymd, code_end), start_ymd, code_end),
+                    lambda: filter_rows(fetch_short_sale(broker, code, code_start, code_end), code_start, code_end),
                 )
                 cred_rows, cred_err = _safe_fetch(
                     "credit_balance",
-                    lambda: filter_rows(fetch_credit_balance(broker, code, code_end), start_ymd, code_end),
+                    lambda: filter_rows(fetch_credit_balance(broker, code, code_end), code_start, code_end),
                 )
                 mrkt_div = market_div_code(market_map.get(code, ""))
                 loan_rows, loan_err = _safe_fetch(
                     "loan_trans",
                     lambda: filter_rows(
-                        fetch_loan_trans(broker, code, start_ymd, code_end, mrkt_div), start_ymd, code_end
+                        fetch_loan_trans(broker, code, code_start, code_end, mrkt_div), code_start, code_end
                     ),
                 )
                 vi_rows, vi_err = _safe_fetch("vi_status", lambda: fetch_vi_status(broker, code, code_end))
