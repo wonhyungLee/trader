@@ -45,11 +45,18 @@ const formatCurrency = (value) => {
   if (value === null || value === undefined || Number.isNaN(value)) return '-'
   const num = Number(value)
   if (!Number.isFinite(num)) return '-'
-  return new Intl.NumberFormat('ko-KR', {
-    style: 'currency',
-    currency: 'KRW',
-    maximumFractionDigits: 0
-  }).format(num)
+  if (typeof Intl === 'undefined' || !Intl.NumberFormat) {
+    return `₩${formatNumber(num)}`
+  }
+  try {
+    return new Intl.NumberFormat('ko-KR', {
+      style: 'currency',
+      currency: 'KRW',
+      maximumFractionDigits: 0
+    }).format(num)
+  } catch (e) {
+    return `₩${formatNumber(num)}`
+  }
 }
 
 const formatPct = (value) => {
