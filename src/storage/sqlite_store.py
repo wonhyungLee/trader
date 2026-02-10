@@ -3,7 +3,7 @@ import os
 import logging
 import pandas as pd
 from typing import List, Dict, Any, Optional, Iterable
-from datetime import datetime
+from datetime import datetime, timedelta
 
 SCHEMA = {
     "universe_members": """
@@ -152,6 +152,26 @@ SCHEMA = {
             PRIMARY KEY (date, code)
         );
     """,
+    "sector_map": """
+        CREATE TABLE IF NOT EXISTS sector_map (
+            code TEXT PRIMARY KEY,
+            sector_code TEXT,
+            sector_name TEXT,
+            industry_code TEXT,
+            industry_name TEXT,
+            updated_at TEXT,
+            source TEXT
+        );
+    """,
+    "universe_changes": """
+        CREATE TABLE IF NOT EXISTS universe_changes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_date TEXT,
+            market TEXT,
+            added_codes_json TEXT,
+            removed_codes_json TEXT
+        );
+    """,
 }
 
 INDEXES = [
@@ -167,6 +187,9 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_credit_balance_daily_code_date ON credit_balance_daily(code, date);",
     "CREATE INDEX IF NOT EXISTS idx_loan_trans_daily_code_date ON loan_trans_daily(code, date);",
     "CREATE INDEX IF NOT EXISTS idx_vi_status_daily_code_date ON vi_status_daily(code, date);",
+    "CREATE INDEX IF NOT EXISTS idx_sector_map_sector ON sector_map(sector_name);",
+    "CREATE INDEX IF NOT EXISTS idx_sector_map_updated ON sector_map(updated_at);",
+    "CREATE INDEX IF NOT EXISTS idx_universe_changes_date ON universe_changes(snapshot_date);",
 ]
 
 
@@ -281,6 +304,77 @@ class SQLiteStore:
 
     def list_stock_codes(self) -> List[str]:
         return self.list_universe_codes()
+
+    # ---------- sector_map ----------
+    def upsert_sector_map(self, rows: Iterable[Dict[str, Any]]):
+        now = datetime.utcnow().isoformat()
+        data = []
+        for r in rows:
+            code = str(r.get("code") or "").zfill(6)
+            if not code:
+                continue
+            data.append(
+                (
+                    code,
+                    r.get("sector_code"),
+                    r.get("sector_name"),
+                    r.get("industry_code"),
+                    r.get("industry_name"),
+                    r.get("updated_at") or now,
+                    r.get("source"),
+                )
+            )
+        if not data:
+            return
+        self.conn.executemany(
+            """
+            INSERT INTO sector_map(code, sector_code, sector_name, industry_code, industry_name, updated_at, source)
+            VALUES(?,?,?,?,?,?,?)
+            ON CONFLICT(code) DO UPDATE SET
+                sector_code=excluded.sector_code,
+                sector_name=excluded.sector_name,
+                industry_code=excluded.industry_code,
+                industry_name=excluded.industry_name,
+                updated_at=excluded.updated_at,
+                source=excluded.source;
+            """,
+            data,
+        )
+        self.conn.commit()
+
+    def list_sector_targets(self, refresh_days: int) -> List[str]:
+        if refresh_days <= 0:
+            cur = self.conn.execute("SELECT code FROM universe_members ORDER BY code")
+            return [row[0] for row in cur.fetchall()]
+        threshold = (datetime.utcnow() - timedelta(days=refresh_days)).isoformat()
+        cur = self.conn.execute(
+            """
+            SELECT u.code
+            FROM universe_members u
+            LEFT JOIN sector_map s ON u.code = s.code
+            WHERE s.updated_at IS NULL OR s.updated_at < ?
+            ORDER BY u.code
+            """,
+            (threshold,),
+        )
+        return [row[0] for row in cur.fetchall()]
+
+    def list_sector_unknowns(self) -> List[str]:
+        cur = self.conn.execute(
+            "SELECT u.code FROM universe_members u LEFT JOIN sector_map s ON u.code=s.code WHERE s.sector_name IS NULL"
+        )
+        return [row[0] for row in cur.fetchall()]
+
+    # ---------- universe_changes ----------
+    def insert_universe_change(self, snapshot_date: str, market: str, added_json: str, removed_json: str):
+        self.conn.execute(
+            """
+            INSERT INTO universe_changes(snapshot_date, market, added_codes_json, removed_codes_json)
+            VALUES(?,?,?,?)
+            """,
+            (snapshot_date, market, added_json, removed_json),
+        )
+        self.conn.commit()
 
     def get_stock(self, code: str) -> Optional[sqlite3.Row]:
         cur = self.conn.execute("SELECT * FROM stock_info WHERE code=?", (code,))

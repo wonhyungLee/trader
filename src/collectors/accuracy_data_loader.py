@@ -114,10 +114,21 @@ def _append_failed_code(path: Path, code: str, error: str) -> None:
         writer.writerow([datetime.utcnow().isoformat(), code, error[:300]])
 
 
+class AuthForbiddenError(Exception):
+    pass
+
+
+def _is_auth_forbidden_error(exc: Exception) -> bool:
+    msg = str(exc)
+    return "403" in msg and "tokenP" in msg
+
+
 def _safe_fetch(label: str, func):
     try:
         return func(), None
     except Exception as exc:
+        if _is_auth_forbidden_error(exc):
+            raise AuthForbiddenError(str(exc))
         logging.warning("fetch failed %s: %s", label, exc)
         return [], exc
 
@@ -140,6 +151,28 @@ def load_codes(store: SQLiteStore) -> List[str]:
     seen = set()
     uniq = []
     for c in out:
+        if c not in seen:
+            seen.add(c)
+            uniq.append(c)
+    return uniq
+
+
+def read_codes_from_paths(paths: Iterable[str]) -> List[str]:
+    codes: List[str] = []
+    for p in paths:
+        if not p:
+            continue
+        if not Path(p).exists():
+            continue
+        try:
+            df = pd.read_csv(p)
+        except Exception:
+            continue
+        col = "code" if "code" in df.columns else "Code" if "Code" in df.columns else df.columns[0]
+        codes.extend(df[col].astype(str).str.zfill(6).tolist())
+    seen = set()
+    uniq = []
+    for c in codes:
         if c not in seen:
             seen.add(c)
             uniq.append(c)
@@ -357,6 +390,10 @@ def main():
     parser.add_argument("--sleep", type=float, default=None, help="종목 처리 간 슬립(초)")
     parser.add_argument("--rate-sleep", type=float, default=None, help="요청 간 슬립(초). 설정 시 KIS rate_limit_sleep_sec를 덮어씀")
     parser.add_argument("--limit", type=int, default=None, help="처리할 종목 수 제한(테스트)")
+    parser.add_argument("--codes-file", action="append", default=[], help="CSV 경로(코드 컬럼) 지정 시 해당 코드만 처리")
+    parser.add_argument("--codes", type=str, default=None, help="쉼표로 구분된 코드 리스트(예: 005930,000660)")
+    parser.add_argument("--progress-file", type=str, default="data/accuracy_progress.json", help="progress 파일 경로")
+    parser.add_argument("--lock-file", type=str, default="data/accuracy_loader.lock", help="lock 파일 경로")
     args = parser.parse_args()
 
     settings = load_settings()
@@ -369,7 +406,21 @@ def main():
             settings.get("kis", {}).get("accuracy_rate_limit_sleep_sec", broker.rate_limit_sleep)
         )
     all_codes = load_codes(store)
-    progress_path = Path("data/accuracy_progress.json")
+    override_codes: List[str] = []
+    if args.codes_file:
+        override_codes.extend(read_codes_from_paths(args.codes_file))
+    if args.codes:
+        override_codes.extend([c.strip().zfill(6) for c in args.codes.split(",") if c.strip()])
+    if override_codes:
+        seen = set()
+        uniq = []
+        for c in override_codes:
+            if c not in seen:
+                seen.add(c)
+                uniq.append(c)
+        all_codes = uniq
+
+    progress_path = Path(args.progress_file)
     if args.resume:
         prog = _load_progress(progress_path) or {}
         last_index = int(prog.get("last_index", -1))
@@ -406,7 +457,7 @@ def main():
     if start_ymd > end_ymd:
         start_ymd = end_ymd
 
-    lock_path = Path("data/accuracy_loader.lock")
+    lock_path = Path(args.lock_file)
     if lock_path.exists():
         try:
             existing_pid = int(lock_path.read_text(encoding="utf-8").strip() or "0")
@@ -437,8 +488,16 @@ def main():
         f"[accuracy] start {args.start_index}/{total_global} range={start_ymd}-{end_ymd} rate_sleep={broker.rate_limit_sleep}",
     )
 
+    item_sleep = args.sleep
+    if item_sleep is None:
+        item_sleep = float(settings.get("kis", {}).get("accuracy_item_sleep_sec", 0.1))
+
+    auth_cooldown = float(settings.get("kis", {}).get("auth_forbidden_cooldown_sec", 600))
+
     try:
-        for code in codes:
+        idx = 0
+        while idx < len(codes):
+            code = codes[idx]
             done += 1
             done_global = args.start_index + done
             try:
@@ -504,6 +563,18 @@ def main():
                         f"credit={len(cred_rows)} loan={len(loan_rows)} vi={len(vi_rows)} err={1 if had_error else 0}"
                     )
                     maybe_notify(settings, msg)
+            except AuthForbiddenError as exc:
+                # Pause and reset cache, then retry the same code
+                logging.warning("auth forbidden detected. cooling down %.1fs", auth_cooldown)
+                if auth_cooldown > 0:
+                    time.sleep(auth_cooldown)
+                try:
+                    broker.clear_token_cache()
+                    broker.reset_sessions()
+                except Exception:
+                    pass
+                done -= 1
+                continue
             except Exception as exc:
                 errors += 1
                 failed_codes.append(code)
@@ -519,11 +590,9 @@ def main():
                     "updated_at": datetime.utcnow().isoformat(),
                 },
             )
-    item_sleep = args.sleep
-    if item_sleep is None:
-        item_sleep = float(settings.get("kis", {}).get("accuracy_item_sleep_sec", 0.1))
-    if item_sleep and item_sleep > 0:
-        time.sleep(item_sleep)
+            if item_sleep and item_sleep > 0:
+                time.sleep(item_sleep)
+            idx += 1
     finally:
         try:
             lock_path.unlink()

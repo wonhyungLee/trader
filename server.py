@@ -109,7 +109,56 @@ def serve_static(path):
 @app.get('/universe')
 def universe():
     conn = get_conn()
-    df = pd.read_sql_query("SELECT code, name, market, group_name as 'group' FROM universe_members ORDER BY code", conn)
+    sector = request.args.get('sector')
+    if sector:
+        if sector.upper() == "UNKNOWN":
+            where = "s.sector_name IS NULL"
+            params = ()
+        else:
+            where = "s.sector_name = ?"
+            params = (sector,)
+    else:
+        where = "1=1"
+        params = ()
+    try:
+        df = pd.read_sql_query(
+            f"""
+            SELECT u.code, u.name, u.market, u.group_name as 'group',
+                   COALESCE(s.sector_name, 'UNKNOWN') AS sector_name,
+                   s.industry_name
+            FROM universe_members u
+            LEFT JOIN sector_map s ON u.code = s.code
+            WHERE {where}
+            ORDER BY u.code
+            """,
+            conn,
+            params=params,
+        )
+    except Exception:
+        df = pd.read_sql_query(
+            "SELECT code, name, market, group_name as 'group' FROM universe_members ORDER BY code",
+            conn,
+        )
+    return jsonify(df.to_dict(orient='records'))
+
+@app.get('/sectors')
+def sectors():
+    conn = get_conn()
+    try:
+        df = pd.read_sql_query(
+            """
+            SELECT u.market,
+                   COALESCE(s.sector_name, 'UNKNOWN') AS sector_name,
+                   COUNT(*) AS count
+            FROM universe_members u
+            LEFT JOIN sector_map s ON u.code = s.code
+            GROUP BY u.market, COALESCE(s.sector_name, 'UNKNOWN')
+            ORDER BY u.market, count DESC, sector_name
+            """,
+            conn,
+        )
+    except Exception:
+        df = pd.DataFrame([], columns=["market", "sector_name", "count"])
     return jsonify(df.to_dict(orient='records'))
 
 @app.get('/prices')

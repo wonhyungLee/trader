@@ -19,6 +19,15 @@ from src.utils.db_exporter import maybe_export_db
 # Ensure logs are visible
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
+
+class AuthForbiddenError(Exception):
+    pass
+
+
+def _is_auth_forbidden_error(exc: Exception) -> bool:
+    msg = str(exc)
+    return "403" in msg and "tokenP" in msg
+
 def read_universe(paths: Iterable[str]) -> List[str]:
     codes: List[str] = []
     for p in paths:
@@ -81,6 +90,7 @@ def backward_refill(
     notify_cb=None,
     notify_every: int = 1,
     resume_end: Optional[str] = None,
+    auth_cooldown: Optional[float] = None,
 ):
     today = datetime.today().date()
     current_end = datetime.strptime(resume_end, "%Y-%m-%d").date() if resume_end else today
@@ -96,12 +106,30 @@ def backward_refill(
         print(f"[{code}] Chunk {chunk_idx}: fetching up to {current_end:%Y-%m-%d}...")
         
         try:
-            df = fetch_prices_kis(kis_client, code, start_date.strftime("%Y-%m-%d"), current_end.strftime("%Y-%m-%d"))  # type: ignore
+            df = fetch_prices_kis(
+                kis_client,
+                code,
+                start_date.strftime("%Y-%m-%d"),
+                current_end.strftime("%Y-%m-%d"),
+            )  # type: ignore
         except Exception as e:
+            if _is_auth_forbidden_error(e):
+                cooldown = float(auth_cooldown or 0)
+                print(f"[{code}] 403 tokenP detected. Cooling down {cooldown:.1f}s and clearing cache.")
+                if cooldown > 0:
+                    time.sleep(cooldown)
+                if kis_client is not None:
+                    try:
+                        kis_client.broker.clear_token_cache()
+                        kis_client.broker.reset_sessions()
+                    except Exception:
+                        pass
+                continue
             print(f"[{code}] API Error: {e}")
             empty_cnt += 1
             time.sleep(sleep * 5)
-            if empty_cnt >= empty_limit: break
+            if empty_cnt >= empty_limit:
+                break
             continue
 
         if df.empty:
@@ -204,6 +232,7 @@ def main():
                     sleep,
                     kis_client=kis_client,
                     resume_end=resume_end,
+                    auth_cooldown=settings.get("kis", {}).get("auth_forbidden_cooldown_sec", 600),
                 )
                 processed_in_this_run += 1
                 

@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd /home/ubuntu/종목선별매매프로그램
-source .venv/bin/activate
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "$ROOT" ]; then
+  ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+cd "$ROOT"
 export PYTHONUNBUFFERED=1
 INTERVAL_SEC=${STATUS_NOTIFY_INTERVAL_SEC:-600}
+PYBIN="./myenv/bin/python"
+if [ ! -x "$PYBIN" ]; then
+  PYBIN="python3"
+fi
 
 while true; do
-  if ! .venv/bin/python - <<'PY'
+  if ! "$PYBIN" - <<'PY'
 import sqlite3, json, time
 from pathlib import Path
 from src.utils.config import load_settings

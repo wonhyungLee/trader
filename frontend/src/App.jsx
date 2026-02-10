@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { fetchUniverse, fetchPrices, fetchSignals, fetchStatus, fetchEngines, fetchOrders, fetchPositions, fetchStrategy, fetchJobs } from './api'
+import { fetchUniverse, fetchSectors, fetchPrices, fetchSignals, fetchStatus, fetchEngines, fetchOrders, fetchPositions, fetchStrategy, fetchJobs } from './api'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import './App.css'
 
@@ -16,9 +16,13 @@ function App() {
   const [positions, setPositions] = useState([])
   const [strategy, setStrategy] = useState(null)
   const [jobs, setJobs] = useState([])
+  const [sectors, setSectors] = useState([])
+  const [sectorFilter, setSectorFilter] = useState('ALL')
 
-  const loadData = () => {
-    fetchUniverse().then(setUniverse)
+  const loadData = (sectorOverride) => {
+    const sector = typeof sectorOverride === 'string' ? sectorOverride : sectorFilter
+    fetchUniverse(sector && sector !== 'ALL' ? sector : undefined).then(setUniverse)
+    fetchSectors().then(setSectors)
     fetchSignals().then(setSignals)
     fetchStatus().then(setStatus)
     fetchEngines().then(setEngines)
@@ -30,9 +34,9 @@ function App() {
 
   useEffect(() => {
     loadData()
-    const id = setInterval(loadData, 30000)
+    const id = setInterval(() => loadData(), 30000)
     return () => clearInterval(id)
-  }, [])
+  }, [sectorFilter])
 
   useEffect(() => {
     if (selected) {
@@ -40,7 +44,21 @@ function App() {
     }
   }, [selected, days])
 
+  useEffect(() => {
+    setSectorFilter('ALL')
+    setSelected(null)
+  }, [filter])
+
+  useEffect(() => {
+    setSelected(null)
+  }, [sectorFilter])
+
   const filtered = useMemo(() => universe.filter(u => u.group === filter), [universe, filter])
+  const marketFilter = filter === 'KOSPI100' ? 'KOSPI' : 'KOSDAQ'
+  const sectorOptions = useMemo(
+    () => sectors.filter(s => s.market === marketFilter).sort((a, b) => b.count - a.count),
+    [sectors, marketFilter]
+  )
 
   return (
     <div className="page">
@@ -50,6 +68,14 @@ function App() {
           <select value={filter} onChange={e => setFilter(e.target.value)}>
             <option value="KOSPI100">KOSPI 100</option>
             <option value="KOSDAQ150">KOSDAQ 150</option>
+          </select>
+          <select value={sectorFilter} onChange={e => setSectorFilter(e.target.value)}>
+            <option value="ALL">전체 섹터</option>
+            {sectorOptions.map((s, i) => (
+              <option key={`${s.market}-${s.sector_name}-${i}`} value={s.sector_name}>
+                {s.sector_name} ({s.count})
+              </option>
+            ))}
           </select>
           <input type="number" value={days} onChange={e => setDays(Number(e.target.value)||30)} min={10} max={400} />
           <button onClick={loadData} className="refresh-btn">새로고침</button>
@@ -65,6 +91,7 @@ function App() {
                 <div className="code">{row.code}</div>
                 <div className="name">{row.name}</div>
                 <div className="mkt">{row.market}</div>
+                <div className="sector">{row.sector_name || 'UNKNOWN'}</div>
               </div>
             ))}
           </div>

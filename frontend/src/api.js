@@ -5,7 +5,8 @@ import axios from 'axios';
 const baseURL = import.meta.env.VITE_API_BASE || '/bnf';
 const api = axios.create({ baseURL });
 
-export const fetchUniverse = () => api.get('/universe').then(r => r.data);
+export const fetchUniverse = (sector) => api.get('/universe', { params: sector ? { sector } : {} }).then(r => r.data);
+export const fetchSectors = () => api.get('/sectors').then(r => r.data);
 export const fetchPrices = (code, days = 60) => api.get('/prices', { params: { code, days } }).then(r => r.data);
 export const fetchSignals = () => api.get('/signals').then(r => r.data);
 export const fetchStatus = () => api.get('/status').then(r => r.data);

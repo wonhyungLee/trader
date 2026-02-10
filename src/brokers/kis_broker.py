@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
 
@@ -150,6 +151,9 @@ class KISBroker:
         self.consecutive_error_cooldown_sec = float(
             self.settings["kis"].get("consecutive_error_cooldown_sec", 180)
         )
+        self.auth_forbidden_cooldown_sec = float(
+            self.settings["kis"].get("auth_forbidden_cooldown_sec", 600)
+        )
         self.session_reset_every = int(self.settings["kis"].get("session_reset_every", 3))
         self.base_url = self.settings["kis"].get(
             "base_url_prod" if self.env == "prod" else "base_url_paper",
@@ -179,6 +183,7 @@ class KISBroker:
         self.sessions = [KISKeySession(cfg, self.base_url, self.token_cache_path, self.use_hashkey, self.hashkey_cache_ttl) for cfg in key_configs]
         self._current_session_idx = 0
         self._consecutive_errors = 0
+        self._auth_forbidden_last_ts = 0.0
 
         # Rate Limiter setup (Total capacity = num_keys * single_key_limit)
         safe_tps = 1.0 / max(0.01, self.rate_limit_sleep)
@@ -204,6 +209,47 @@ class KISBroker:
                 pass
             s.session = requests.Session()
         self._current_session_idx = 0
+
+    def clear_token_cache(self):
+        for s in self.sessions:
+            s._token = None
+            s._token_expire = None
+            s._hashkey_cache = {"key": None, "value": None, "ts": 0.0}
+
+        try:
+            base = Path(self.token_cache_path)
+            if base.parent.exists():
+                pattern = f"{base.stem}*.json"
+                for p in base.parent.glob(pattern):
+                    try:
+                        p.unlink()
+                    except Exception:
+                        pass
+        except Exception as exc:
+            logging.warning("Failed to clear token cache files: %s", exc)
+
+        try:
+            state_path = Path(self.rate_limiter.state_file)
+            if state_path.exists():
+                state_path.unlink()
+        except Exception:
+            pass
+
+    def _cooldown_on_auth_forbidden(self, reason: str):
+        cooldown = self.auth_forbidden_cooldown_sec
+        if cooldown <= 0:
+            return
+        now = time.time()
+        sleep_sec = cooldown
+        if self._auth_forbidden_last_ts > 0:
+            elapsed = now - self._auth_forbidden_last_ts
+            if elapsed < cooldown:
+                sleep_sec = cooldown - elapsed
+        self._auth_forbidden_last_ts = time.time()
+        logging.warning("KIS 403 (%s). Cooling down %.1fs and clearing token cache.", reason, sleep_sec)
+        time.sleep(sleep_sec)
+        self.clear_token_cache()
+        self.reset_sessions()
 
     # Proxy properties for backward compatibility
     @property
@@ -254,24 +300,33 @@ class KISBroker:
             # Wait for rate limit token
             self.rate_limiter.wait(priority=priority)
 
-            token = sess.ensure_token()
-            headers = {
-                "content-type": "application/json; charset=utf-8",
-                "authorization": f"Bearer {token}",
-                "appkey": sess.app_key,
-                "appsecret": sess.app_secret,
-                "tr_id": tr_id,
-            }
-            if self.custtype:
-                headers["custtype"] = self.custtype
-
-            # Optional hashkey header for POST requests
-            if method != "GET" and json_body is not None:
-                hk = sess.get_hashkey(json_body)
-                if hk:
-                    headers["hashkey"] = hk
-
             try:
+                try:
+                    token = sess.ensure_token()
+                except HTTPError as exc:
+                    status = exc.response.status_code if getattr(exc, "response", None) else None
+                    if status == 403:
+                        self._cooldown_on_auth_forbidden("token")
+                        token = sess.ensure_token()
+                    else:
+                        raise
+
+                headers = {
+                    "content-type": "application/json; charset=utf-8",
+                    "authorization": f"Bearer {token}",
+                    "appkey": sess.app_key,
+                    "appsecret": sess.app_secret,
+                    "tr_id": tr_id,
+                }
+                if self.custtype:
+                    headers["custtype"] = self.custtype
+
+                # Optional hashkey header for POST requests
+                if method != "GET" and json_body is not None:
+                    hk = sess.get_hashkey(json_body)
+                    if hk:
+                        headers["hashkey"] = hk
+
                 timeout = (self.timeout_connect, self.timeout_read)
                 if method == "GET":
                     resp = sess.session.get(url, headers=headers, params=params, timeout=timeout)
@@ -289,6 +344,8 @@ class KISBroker:
                         pass
 
                 if (resp.status_code in (401, 403) or is_token_expired):
+                    if resp.status_code == 403:
+                        self._cooldown_on_auth_forbidden("api")
                     logging.info("KIS token expired (%s) for key %s, refreshing...", resp.status_code, sess.app_key[:8])
                     token, exp = sess.issue_token()
                     sess._save_token_cache(token, exp)
@@ -307,6 +364,10 @@ class KISBroker:
                     return {"text": resp.text}
             except HTTPError as exc:
                 status = exc.response.status_code if getattr(exc, "response", None) else None
+                if status == 403:
+                    self._cooldown_on_auth_forbidden("api")
+                    last_exc = exc
+                    continue
                 if not is_retryable_status(status):
                     raise
                 last_exc = exc
