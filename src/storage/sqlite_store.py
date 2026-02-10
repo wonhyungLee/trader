@@ -6,6 +6,15 @@ from typing import List, Dict, Any, Optional, Iterable
 from datetime import datetime
 
 SCHEMA = {
+    "universe_members": """
+        CREATE TABLE IF NOT EXISTS universe_members (
+            code TEXT PRIMARY KEY,
+            market TEXT,
+            name TEXT,
+            group_name TEXT,
+            updated_at TEXT
+        );
+    """,
     "stock_info": """
         CREATE TABLE IF NOT EXISTS stock_info (
             code TEXT PRIMARY KEY,
@@ -66,10 +75,21 @@ SCHEMA = {
     "refill_progress": """
         CREATE TABLE IF NOT EXISTS refill_progress (
             code TEXT PRIMARY KEY,
-            last_fetched_end_date TEXT,
-            min_date_in_db TEXT,
+            next_end_date TEXT,
+            last_min_date TEXT,
             status TEXT,
-            updated_at TEXT
+            updated_at TEXT,
+            message TEXT
+        );
+    """,
+    "job_runs": """
+        CREATE TABLE IF NOT EXISTS job_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_name TEXT,
+            started_at TEXT,
+            finished_at TEXT,
+            status TEXT,
+            message TEXT
         );
     """,
     "investor_flow_daily": """
@@ -140,6 +160,7 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_order_queue_status ON order_queue(status);",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_order_queue_exec_code_side_pending ON order_queue(exec_date, code, side) WHERE status='PENDING';",
     "CREATE INDEX IF NOT EXISTS idx_refill_progress_status ON refill_progress(status);",
+    "CREATE INDEX IF NOT EXISTS idx_job_runs_job_name ON job_runs(job_name);",
     "CREATE INDEX IF NOT EXISTS idx_investor_flow_daily_code_date ON investor_flow_daily(code, date);",
     "CREATE INDEX IF NOT EXISTS idx_program_trade_daily_code_date ON program_trade_daily(code, date);",
     "CREATE INDEX IF NOT EXISTS idx_short_sale_daily_code_date ON short_sale_daily(code, date);",
@@ -156,18 +177,79 @@ class SQLiteStore:
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.execute("PRAGMA journal_mode=WAL;")
         self.conn.row_factory = sqlite3.Row
+        self._refill_cols: Optional[set[str]] = None
         self.ensure_schema()
 
     def ensure_schema(self):
         cur = self.conn.cursor()
         for ddl in SCHEMA.values():
             cur.execute(ddl)
+        self._ensure_refill_progress_columns()
         for idx in INDEXES:
             try:
                 cur.execute(idx)
             except (sqlite3.IntegrityError, sqlite3.OperationalError) as exc:
                 logging.warning('failed to create index: %s (%s)', idx, exc)
         self.conn.commit()
+
+    def _ensure_refill_progress_columns(self):
+        try:
+            cur = self.conn.execute("PRAGMA table_info(refill_progress)")
+            cols = {row[1] for row in cur.fetchall()}
+            if "next_end_date" not in cols:
+                self.conn.execute("ALTER TABLE refill_progress ADD COLUMN next_end_date TEXT")
+            if "last_min_date" not in cols:
+                self.conn.execute("ALTER TABLE refill_progress ADD COLUMN last_min_date TEXT")
+            if "message" not in cols:
+                self.conn.execute("ALTER TABLE refill_progress ADD COLUMN message TEXT")
+            self._refill_cols = cols | {"next_end_date", "last_min_date", "message"}
+        except Exception:
+            pass
+
+    # ---------- universe_members ----------
+    def upsert_universe_members(self, rows: Iterable[Dict[str, Any]]):
+        now = datetime.utcnow().isoformat()
+        data = []
+        codes = []
+        for r in rows:
+            code = str(r.get("code") or "").zfill(6)
+            if not code:
+                continue
+            codes.append(code)
+            data.append(
+                (
+                    code,
+                    r.get("market"),
+                    r.get("name"),
+                    r.get("group_name"),
+                    now,
+                )
+            )
+        self.conn.executemany(
+            """
+            INSERT INTO universe_members(code, market, name, group_name, updated_at)
+            VALUES(?,?,?,?,?)
+            ON CONFLICT(code) DO UPDATE SET
+                market=excluded.market,
+                name=excluded.name,
+                group_name=excluded.group_name,
+                updated_at=excluded.updated_at;
+            """,
+            data,
+        )
+        if codes:
+            placeholder = ",".join("?" * len(codes))
+            self.conn.execute(f"DELETE FROM universe_members WHERE code NOT IN ({placeholder})", tuple(codes))
+        self.conn.commit()
+
+    def list_universe_codes(self) -> List[str]:
+        cur = self.conn.execute("SELECT code FROM universe_members ORDER BY code")
+        rows = [row[0] for row in cur.fetchall()]
+        return rows
+
+    def load_universe_df(self) -> pd.DataFrame:
+        cur = self.conn.execute("SELECT code, name, market, group_name FROM universe_members ORDER BY code")
+        return pd.DataFrame(cur.fetchall(), columns=[c[0] for c in cur.description])
 
     # ---------- stock_info ----------
     def upsert_stock_info(self, rows: Iterable[Dict[str, Any]]):
@@ -198,12 +280,58 @@ class SQLiteStore:
         self.conn.commit()
 
     def list_stock_codes(self) -> List[str]:
-        cur = self.conn.execute("SELECT code FROM stock_info")
-        return [row[0] for row in cur.fetchall()]
+        return self.list_universe_codes()
 
     def get_stock(self, code: str) -> Optional[sqlite3.Row]:
         cur = self.conn.execute("SELECT * FROM stock_info WHERE code=?", (code,))
         return cur.fetchone()
+
+    def replace_stock_info(self, rows: Iterable[Dict[str, Any]]):
+        now = datetime.utcnow().isoformat()
+        data = []
+        codes = []
+        for r in rows:
+            code = str(r.get("code") or "").zfill(6)
+            if not code:
+                continue
+            codes.append(code)
+            data.append(
+                (
+                    code,
+                    r.get("name"),
+                    r.get("market"),
+                    float(r.get("marcap") or 0),
+                    now,
+                )
+            )
+        self.conn.execute("DELETE FROM stock_info")
+        if data:
+            self.conn.executemany(
+                """
+                INSERT INTO stock_info(code, name, market, marcap, updated_at)
+                VALUES(?,?,?,?,?)
+                """,
+                data,
+            )
+        self.conn.commit()
+
+    # ---------- job_runs ----------
+    def start_job(self, job_name: str, message: str = "") -> int:
+        now = datetime.utcnow().isoformat()
+        cur = self.conn.execute(
+            "INSERT INTO job_runs(job_name, started_at, status, message) VALUES(?,?,?,?)",
+            (job_name, now, "RUNNING", message or ""),
+        )
+        self.conn.commit()
+        return int(cur.lastrowid)
+
+    def finish_job(self, job_id: int, status: str = "SUCCESS", message: str = ""):
+        now = datetime.utcnow().isoformat()
+        self.conn.execute(
+            "UPDATE job_runs SET finished_at=?, status=?, message=? WHERE id=?",
+            (now, status, message or "", job_id),
+        )
+        self.conn.commit()
 
     # ---------- daily_price ----------
     def upsert_daily_prices(self, code: str, df: pd.DataFrame):
@@ -378,19 +506,45 @@ class SQLiteStore:
         cur = self.conn.execute("SELECT * FROM refill_progress WHERE code=?", (code,))
         return cur.fetchone()
 
-    def upsert_refill_status(self, code: str, last_end: Optional[str], min_date: Optional[str], status: str):
+    def upsert_refill_status(
+        self,
+        code: str,
+        next_end: Optional[str],
+        last_min: Optional[str],
+        status: str,
+        message: str = "",
+    ):
         now = datetime.utcnow().isoformat()
+        cols = self._refill_cols
+        if cols is None:
+            cur = self.conn.execute("PRAGMA table_info(refill_progress)")
+            cols = {row[1] for row in cur.fetchall()}
+            self._refill_cols = cols
+
+        payload = {
+            "code": code,
+            "next_end_date": next_end,
+            "last_min_date": last_min,
+            "status": status,
+            "updated_at": now,
+            "message": message or "",
+        }
+        # Backward compatibility columns if present
+        if "last_fetched_end_date" in cols:
+            payload["last_fetched_end_date"] = next_end
+        if "min_date_in_db" in cols:
+            payload["min_date_in_db"] = last_min
+
+        cols_list = [c for c in payload.keys() if c in cols or c in {"code", "next_end_date", "last_min_date", "status", "updated_at", "message", "last_fetched_end_date", "min_date_in_db"}]
+        cols_list = list(dict.fromkeys(cols_list))
+        placeholders = ",".join(["?"] * len(cols_list))
+        updates = ",".join([f"{c}=excluded.{c}" for c in cols_list if c != "code"])
+        values = [payload[c] for c in cols_list]
+
         self.conn.execute(
-            """
-            INSERT INTO refill_progress(code, last_fetched_end_date, min_date_in_db, status, updated_at)
-            VALUES(?,?,?,?,?)
-            ON CONFLICT(code) DO UPDATE SET
-                last_fetched_end_date=excluded.last_fetched_end_date,
-                min_date_in_db=excluded.min_date_in_db,
-                status=excluded.status,
-                updated_at=excluded.updated_at;
-            """,
-            (code, last_end, min_date, status, now),
+            f"INSERT INTO refill_progress({','.join(cols_list)}) VALUES({placeholders}) "
+            f"ON CONFLICT(code) DO UPDATE SET {updates}",
+            values,
         )
         self.conn.commit()
 

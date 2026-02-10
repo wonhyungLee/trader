@@ -1,58 +1,58 @@
-"""유니버스(종목 마스터) 수집 스크립트.
+"""유니버스(250개) 스냅샷 로더.
 
-기본 구현은 FinanceDataReader를 사용해 KRX 전체를 받아 SQLite `stock_info`에 저장한다.
-실전 운영 시 KIS 종목마스터 API로 교체해도 동일한 인터페이스를 유지한다.
+오직 data/universe_kospi100.csv + data/universe_kosdaq150.csv만 사용한다.
 """
 
 import argparse
 from datetime import datetime
+from pathlib import Path
 import pandas as pd
-import FinanceDataReader as fdr  # type: ignore
 
 from src.storage.sqlite_store import SQLiteStore
 from src.utils.config import load_settings
 from src.utils.db_exporter import maybe_export_db
 
 
-EXCLUDE_MARKETS = {"ETF", "ETN", "ELW", "KONEX"}
+def load_universe_csv(path: str, group_name: str) -> pd.DataFrame:
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"universe file missing: {path}")
+    df = pd.read_csv(p)
+    required = {"code", "name", "market"}
+    if not required.issubset(set(df.columns)):
+        raise ValueError(f"Missing columns in {path}: {required - set(df.columns)}")
+    df = df.copy()
+    df["code"] = df["code"].astype(str).str.zfill(6)
+    df["group_name"] = group_name
+    return df[["code", "name", "market", "group_name"]]
 
 
-def load_krx_master() -> pd.DataFrame:
-    df = fdr.StockListing("KRX")
-    # FinanceDataReader 0.9.x returns columns with capitalized names (Code/Name/Market/Marcap).
-    # Keep backward compatibility with old Symbol naming.
-    rename_map = {
-        "Symbol": "code",
-        "Code": "code",
-        "Name": "name",
-        "Market": "market",
-        "Marcap": "marcap",
-    }
-    df = df.rename(columns=rename_map)
-    missing = {"code", "name", "market", "marcap"} - set(df.columns)
-    if missing:
-        raise ValueError(f"Unexpected columns from StockListing, missing: {missing}")
-    df = df[["code", "name", "market", "marcap"]]
-    df = df[~df["market"].isin(EXCLUDE_MARKETS)]
-    df = df[df["code"].str.len() == 6]
-    return df
-
-
-def main(top_n: int | None = None):
+def main():
     settings = load_settings()
     store = SQLiteStore(settings.get("database", {}).get("path", "data/market_data.db"))
+    job_id = store.start_job("universe_loader")
 
-    df = load_krx_master()
-    if top_n:
-        df = df.sort_values("marcap", ascending=False).head(top_n)
+    try:
+        df_kospi = load_universe_csv("data/universe_kospi100.csv", "KOSPI100")
+        df_kosdaq = load_universe_csv("data/universe_kosdaq150.csv", "KOSDAQ150")
+        df = pd.concat([df_kospi, df_kosdaq], ignore_index=True)
 
-    store.upsert_stock_info(df.to_dict(orient="records"))
-    print(f"stored {len(df)} symbols at {datetime.now():%Y-%m-%d %H:%M:%S}")
-    maybe_export_db(settings, store.db_path)
+        # universe_members 고정
+        store.upsert_universe_members(df.to_dict(orient="records"))
+        # stock_info는 universe_members 기준 250개만 유지
+        store.replace_stock_info(
+            df.assign(marcap=0).to_dict(orient="records")
+        )
+
+        print(f"stored universe {len(df)} symbols at {datetime.now():%Y-%m-%d %H:%M:%S}")
+        maybe_export_db(settings, store.db_path)
+        store.finish_job(job_id, "SUCCESS", f"stored {len(df)} symbols")
+    except Exception as exc:
+        store.finish_job(job_id, "ERROR", str(exc))
+        raise
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--top", type=int, default=None, help="상위 시가총액 종목만 저장")
-    args = parser.parse_args()
-    main(args.top)
+    parser.parse_args()
+    main()

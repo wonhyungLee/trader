@@ -25,13 +25,13 @@ class KISPriceClient:
         # self.rate_sleep is no longer needed; KISBroker handles it.
 
     def _tr_id(self) -> str:
-        # 기간별 시세(일봉) TR
-        return "FHKST01010400"
+        # 국내주식 기간별 시세(일/주/월/년) TR
+        return "FHKST03010100"
 
     def get_daily_prices(self, code: str, start: str, end: str) -> Dict[str, Any]:
         """start/end: YYYYMMDD"""
         tr_id = self._tr_id()
-        url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-daily-price"
+        url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
         params = {
             "FID_COND_MRKT_DIV_CODE": "J",
             "FID_INPUT_ISCD": code,
@@ -40,5 +40,4 @@ class KISPriceClient:
             "FID_PERIOD_DIV_CODE": "D",
             "FID_ORG_ADJ_PRC": "1",
         }
-        # time.sleep(self.rate_sleep) -> Handled by broker.request
         return self.broker.request(tr_id, url, params=params)

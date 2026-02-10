@@ -27,7 +27,7 @@ def load_universe(settings: dict) -> List[str]:
     for p in paths:
         path = Path(p)
         if not path.exists():
-            continue
+            raise FileNotFoundError(f"universe file missing: {p}")
         df = pd.read_csv(path)
         col = "code" if "code" in df.columns else "Code" if "Code" in df.columns else df.columns[0]
         codes.extend(df[col].astype(str).str.zfill(6).tolist())
@@ -41,14 +41,7 @@ def load_universe(settings: dict) -> List[str]:
                 uniq.append(c)
         return uniq
 
-    # fallback to DB
-    db_path = settings.get("database", {}).get("path", "data/market_data.db")
-    conn = sqlite3.connect(db_path)
-    try:
-        cur = conn.execute("SELECT code FROM stock_info ORDER BY marcap DESC")
-        return [row[0] for row in cur.fetchall()]
-    finally:
-        conn.close()
+    return []
 
 
 def load_baseline(settings: dict) -> Dict[str, Dict]:
@@ -56,14 +49,14 @@ def load_baseline(settings: dict) -> Dict[str, Dict]:
     conn = sqlite3.connect(db_path)
     try:
         query = """
-        SELECT dp.code, dp.date, dp.close, dp.ma25, dp.disparity, si.name, si.market
+        SELECT dp.code, dp.date, dp.close, dp.ma25, dp.disparity, um.name, um.market
         FROM daily_price dp
         JOIN (
             SELECT code, MAX(date) AS max_date
             FROM daily_price
             GROUP BY code
         ) m ON dp.code = m.code AND dp.date = m.max_date
-        LEFT JOIN stock_info si ON dp.code = si.code
+        LEFT JOIN universe_members um ON dp.code = um.code
         """
         cur = conn.execute(query)
         baseline: Dict[str, Dict] = {}

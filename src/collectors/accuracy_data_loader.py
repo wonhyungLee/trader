@@ -123,7 +123,7 @@ def _safe_fetch(label: str, func):
 
 
 def load_codes(store: SQLiteStore) -> List[str]:
-    codes = store.list_stock_codes()
+    codes = store.list_universe_codes()
     if codes:
         return codes
     # fallback to universe CSVs if DB is empty
@@ -147,7 +147,7 @@ def load_codes(store: SQLiteStore) -> List[str]:
 
 
 def load_market_map(store: SQLiteStore) -> Dict[str, str]:
-    cur = store.conn.execute("SELECT code, market FROM stock_info")
+    cur = store.conn.execute("SELECT code, market FROM universe_members")
     return {row[0]: (row[1] or "") for row in cur.fetchall()}
 
 

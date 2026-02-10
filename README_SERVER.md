@@ -47,8 +47,8 @@ sqlite3 data/market_data.db "VACUUM;"  # 최초 생성 겸 확인
 ## 6. 초기 데이터 적재
 ```bash
 source venv/bin/activate
-python -m src.collectors.universe_loader           # KRX 종목 마스터
-python -m src.collectors.bulk_loader --days 500    # 최근 ~2년 일봉
+python -m src.collectors.universe_loader           # 유니버스 250 고정
+python -m src.collectors.refill_loader --resume    # KIS 일봉 백필
 ```
 - 이후 매일: `python -m src.collectors.daily_loader`
 

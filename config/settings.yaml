@@ -13,7 +13,7 @@ kis:
   account_no: "${KIS_ACCOUNT_NO}"  # 예: 00000000-01
   custtype: "P"
   token_cache_path: ".cache/kis_token.json"
-  rate_limit_sleep_sec: 0.10  # prod(20/s) 기준 안전 마진. paper(2/s)에서는 0.50 권장
+  rate_limit_sleep_sec: 0.25
   timeout_connect_sec: 5
   timeout_read_sec: 20
   max_retries: 8
@@ -23,7 +23,7 @@ kis:
   consecutive_error_cooldown_after: 10
   consecutive_error_cooldown_sec: 180
   session_reset_every: 3
-  accuracy_rate_limit_sleep_sec: 0.06
+  accuracy_rate_limit_sleep_sec: 0.25
   accuracy_item_sleep_sec: 0.1
 
 logging:
@@ -51,7 +51,7 @@ backtest:
 export_csv:
   enabled: true
   out_dir: "data/csv"
-  mode: "append"      # "overwrite" | "timestamped" | "append"
+  mode: "overwrite"      # "overwrite" | "timestamped" | "append"
   tables: []          # empty = all tables
 
 monitor:

@@ -41,7 +41,7 @@ def main(codes: list[str] | None = None, days: int = 500):
     settings = load_settings()
     store = SQLiteStore(settings.get("database", {}).get("path", "data/market_data.db"))
     if codes is None:
-        codes = store.list_stock_codes()
+        codes = store.list_universe_codes()
     end = datetime.today().strftime("%Y-%m-%d")
     start = (datetime.today() - timedelta(days=days)).strftime("%Y-%m-%d")
     for code in codes:

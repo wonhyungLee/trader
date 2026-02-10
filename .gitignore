@@ -4,6 +4,7 @@ __pycache__/
 .cache/
 logs/
 data/*.db
+data/*.db*
 *.sqlite
 *.log
 report.png

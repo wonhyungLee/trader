@@ -33,12 +33,16 @@ def _order_by_for_table(table: str) -> Optional[str]:
         return "date, code"
     if table == "stock_info":
         return "code"
+    if table == "universe_members":
+        return "code"
     if table == "order_queue":
         return "id"
     if table == "position_state":
         return "code"
     if table == "refill_progress":
         return "code"
+    if table == "job_runs":
+        return "id"
     return None
 
 

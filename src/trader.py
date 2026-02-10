@@ -45,8 +45,11 @@ def generate_signals(store: SQLiteStore, settings: Dict) -> List[Dict]:
     last2["ma25_prev"] = last2.groupby("code")["ma25"].shift(1)
     latest = last2.groupby("code").tail(1)
 
-    stock_info = store.conn.execute("SELECT code,name,market,marcap FROM stock_info").fetchall()
-    stock_df = {row[0]: {"name": row[1], "market": row[2], "marcap": row[3]} for row in stock_info}
+    stock_info = store.conn.execute("SELECT code,name,market FROM universe_members").fetchall()
+    stock_df = {row[0]: {"name": row[1], "market": row[2]} for row in stock_info}
+    universe_codes = set(stock_df.keys())
+    if universe_codes:
+        latest = latest[latest["code"].isin(universe_codes)]
     # liquidity filter
     latest = latest.sort_values("amount", ascending=False)
     latest = latest[latest["amount"] >= params.min_amount]
@@ -205,16 +208,22 @@ def main():
     settings = load_settings()
     store = SQLiteStore(settings.get("database", {}).get("path", "data/market_data.db"))
     broker = KISBroker(settings)
+    job_id = store.start_job(f"trader_{args.mode}")
 
-    if args.mode == "close":
-        cmd_close(store, settings)
-    elif args.mode == "open":
-        cmd_open(store, settings, broker)
-    elif args.mode == "sync":
-        cmd_sync(store, settings, broker)
-    elif args.mode == "cancel":
-        cmd_cancel(store, settings, broker)
-    maybe_export_db(settings, store.db_path)
+    try:
+        if args.mode == "close":
+            cmd_close(store, settings)
+        elif args.mode == "open":
+            cmd_open(store, settings, broker)
+        elif args.mode == "sync":
+            cmd_sync(store, settings, broker)
+        elif args.mode == "cancel":
+            cmd_cancel(store, settings, broker)
+        store.finish_job(job_id, "SUCCESS", f"mode={args.mode}")
+        maybe_export_db(settings, store.db_path)
+    except Exception as exc:
+        store.finish_job(job_id, "ERROR", str(exc))
+        raise
 
 
 if __name__ == "__main__":

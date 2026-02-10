@@ -76,9 +76,13 @@ def run_backtest(store: SQLiteStore, params: StrategyParams, output_dir: Path = 
     if prices.empty:
         raise SystemExit("daily_price 가 비어있습니다. 먼저 데이터를 적재하세요.")
 
-    stock_info = pd.read_sql_query("SELECT * FROM stock_info", store.conn)
-    stock_info = stock_info[["code", "market"]].copy()
+    stock_info = pd.read_sql_query("SELECT code, market FROM universe_members", store.conn)
+    if stock_info.empty:
+        raise SystemExit("universe_members is empty. Run universe_loader first.")
     market_map = dict(zip(stock_info["code"], stock_info["market"]))
+    universe_codes = set(stock_info["code"].tolist())
+    if universe_codes:
+        prices = prices[prices["code"].isin(universe_codes)]
 
     prices["date"] = pd.to_datetime(prices["date"])
     prices = prices.sort_values(["code", "date"]).copy()
