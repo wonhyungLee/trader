@@ -20,6 +20,7 @@ from src.analyzer.backtest_runner import load_strategy
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+CLIENT_ERROR_LOG = Path("logs/client_error.log")
 
 DB_PATH = Path('data/market_data.db')
 FRONTEND_DIST = Path('frontend/dist')
@@ -620,6 +621,18 @@ def selection():
     conn = get_conn()
     settings = load_settings()
     return jsonify(_build_selection_summary(conn, settings))
+
+
+@app.post('/client_error')
+def client_error():
+    payload = request.get_json(silent=True) or {}
+    try:
+        CLIENT_ERROR_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with CLIENT_ERROR_LOG.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        logging.exception("failed to log client error")
+    return jsonify({"status": "ok"})
 
 @app.get('/status')
 def status():
