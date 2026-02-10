@@ -37,3 +37,6 @@ ts,code,error
 2026-02-10T03:56:16.230023,161390,inv=403 Client Error: Forbidden for url: https://openapi.koreainvestment.com:9443/oauth2/tokenP; prog=403 Client Error: Forbidden for url: https://openapi.koreainvestment.com:9443/oauth2/tokenP; short=403 Client Error: Forbidden for url: https://openapi.koreainvestment.com:9443/oauth2/tokenP; credit
 2026-02-10T03:56:17.611340,161580,inv=403 Client Error: Forbidden for url: https://openapi.koreainvestment.com:9443/oauth2/tokenP; prog=403 Client Error: Forbidden for url: https://openapi.koreainvestment.com:9443/oauth2/tokenP; short=403 Client Error: Forbidden for url: https://openapi.koreainvestment.com:9443/oauth2/tokenP; credit
 2026-02-10T03:56:21.312750,166090,inv=403 Client Error: Forbidden for url: https://openapi.koreainvestment.com:9443/oauth2/tokenP; prog=None; short=None; credit=None; loan=None; vi=None
+2026-02-10T10:13:08.351560,000660,inv=None; prog=None; short=500 retryable; credit=500 retryable; loan=None; vi=None
+2026-02-10T10:13:10.159119,001440,inv=500 retryable; prog=500 retryable; short=None; credit=None; loan=None; vi=None
+2026-02-10T10:13:10.978020,003490,inv=None; prog=None; short=None; credit=None; loan=500 retryable; vi=500 retryable
