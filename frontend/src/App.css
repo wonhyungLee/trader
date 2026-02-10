@@ -467,6 +467,44 @@ body {
   letter-spacing: 0.08em;
 }
 
+.price-table {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.price-row {
+  display: grid;
+  grid-template-columns: 88px repeat(4, minmax(0, 1fr)) 1.2fr 1.2fr 70px;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.7);
+  min-width: 720px;
+}
+
+.price-row.head {
+  position: sticky;
+  top: 0;
+  background: rgba(15, 23, 42, 0.95);
+  border-color: rgba(148, 163, 184, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  color: var(--text-muted);
+  z-index: 1;
+}
+
+.price-row .b {
+  font-weight: 700;
+  color: var(--text);
+}
+
 .split-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -694,5 +732,11 @@ body {
   }
   .signal-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .price-table {
+    max-height: 260px;
+  }
+  .price-row {
+    min-width: 640px;
   }
 }

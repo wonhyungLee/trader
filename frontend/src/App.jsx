@@ -59,6 +59,7 @@ function App() {
   const [filter, setFilter] = useState('KOSPI100')
   const [selected, setSelected] = useState(null)
   const [prices, setPrices] = useState([])
+  const [pricesLoading, setPricesLoading] = useState(false)
   const [days, setDays] = useState(120)
   const [signals, setSignals] = useState([])
   const [status, setStatus] = useState(null)
@@ -93,9 +94,16 @@ function App() {
   }, [sectorFilter])
 
   useEffect(() => {
-    if (selected) {
-      fetchPrices(selected.code, days).then(setPrices)
-    }
+    if (!selected) return
+    setPricesLoading(true)
+    fetchPrices(selected.code, days)
+      .then((data) => {
+        setPrices(Array.isArray(data) ? data : [])
+      })
+      .catch(() => {
+        setPrices([])
+      })
+      .finally(() => setPricesLoading(false))
   }, [selected, days])
 
   useEffect(() => {
@@ -144,6 +152,11 @@ function App() {
   const refreshLabel = lastUpdated
     ? `${lastUpdated.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`
     : '-'
+
+  const tableRows = useMemo(() => {
+    if (!chartData.length) return []
+    return [...chartData].reverse().slice(0, 30)
+  }, [chartData])
 
   return (
     <div className="app-shell">
@@ -298,32 +311,71 @@ function App() {
               <div className="chart-stack">
                 <div className="chart-card">
                   <div className="chart-title">Price · MA25 · Volume</div>
-                  <ResponsiveContainer width="100%" height={260}>
-                    <ComposedChart data={chartData} margin={{ left: 6, right: 18, top: 10, bottom: 8 }}>
-                      <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.08)" />
-                      <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} interval={Math.max(0, Math.floor(chartData.length / 6))} />
-                      <YAxis yAxisId="price" tick={{ fontSize: 11, fill: '#94a3b8' }} domain={['auto', 'auto']} />
-                      <YAxis yAxisId="volume" orientation="right" tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                      <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid rgba(148,163,184,0.3)' }} labelStyle={{ color: '#e2e8f0' }} />
-                      <Legend wrapperStyle={{ color: '#cbd5f5' }} />
-                      <Area yAxisId="price" dataKey="close" stroke="#7dd3fc" fill="rgba(14,116,144,0.35)" name="Close" />
-                      <Line yAxisId="price" type="monotone" dataKey="ma25" stroke="#facc15" dot={false} strokeWidth={2} name="MA25" />
-                      <Bar yAxisId="volume" dataKey="volume" fill="rgba(251,191,36,0.35)" name="Volume" />
-                    </ComposedChart>
-                  </ResponsiveContainer>
+                  {pricesLoading ? (
+                    <div className="empty">차트 로딩 중...</div>
+                  ) : chartData.length === 0 ? (
+                    <div className="empty">가격 데이터가 없습니다.</div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={260}>
+                      <ComposedChart data={chartData} margin={{ left: 6, right: 18, top: 10, bottom: 8 }}>
+                        <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.08)" />
+                        <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} interval={Math.max(0, Math.floor(chartData.length / 6))} />
+                        <YAxis yAxisId="price" tick={{ fontSize: 11, fill: '#94a3b8' }} domain={['auto', 'auto']} />
+                        <YAxis yAxisId="volume" orientation="right" tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                        <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid rgba(148,163,184,0.3)' }} labelStyle={{ color: '#e2e8f0' }} />
+                        <Legend wrapperStyle={{ color: '#cbd5f5' }} />
+                        <Area yAxisId="price" dataKey="close" stroke="#7dd3fc" fill="rgba(14,116,144,0.35)" name="Close" />
+                        <Line yAxisId="price" type="monotone" dataKey="ma25" stroke="#facc15" dot={false} strokeWidth={2} name="MA25" />
+                        <Bar yAxisId="volume" dataKey="volume" fill="rgba(251,191,36,0.35)" name="Volume" />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  )}
                 </div>
                 <div className="chart-card">
                   <div className="chart-title">Disparity Flow</div>
-                  <ResponsiveContainer width="100%" height={160}>
-                    <AreaChart data={chartData} margin={{ left: 6, right: 18, top: 10, bottom: 8 }}>
-                      <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.08)" />
-                      <XAxis dataKey="date" hide />
-                      <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                      <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid rgba(148,163,184,0.3)' }} labelStyle={{ color: '#e2e8f0' }} />
-                      <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="4 4" />
-                      <Area dataKey="disparity" stroke="#fb7185" fill="rgba(248,113,113,0.35)" />
-                    </AreaChart>
-                  </ResponsiveContainer>
+                  {chartData.length === 0 ? (
+                    <div className="empty">가격 데이터가 없습니다.</div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={160}>
+                      <AreaChart data={chartData} margin={{ left: 6, right: 18, top: 10, bottom: 8 }}>
+                        <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.08)" />
+                        <XAxis dataKey="date" hide />
+                        <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                        <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid rgba(148,163,184,0.3)' }} labelStyle={{ color: '#e2e8f0' }} />
+                        <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="4 4" />
+                        <Area dataKey="disparity" stroke="#fb7185" fill="rgba(248,113,113,0.35)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </div>
+
+              <div className="panel soft">
+                <div className="panel-title">Daily Prices</div>
+                <div className="price-table">
+                  <div className="price-row head">
+                    <span>Date</span>
+                    <span>Open</span>
+                    <span>High</span>
+                    <span>Low</span>
+                    <span>Close</span>
+                    <span>Volume</span>
+                    <span>Amount</span>
+                    <span>Disp</span>
+                  </div>
+                  {tableRows.map((row) => (
+                    <div key={row.date} className="price-row">
+                      <span className="mono">{row.date}</span>
+                      <span>{formatNumber(row.open)}</span>
+                      <span>{formatNumber(row.high)}</span>
+                      <span>{formatNumber(row.low)}</span>
+                      <span className="b">{formatNumber(row.close)}</span>
+                      <span>{formatNumber(row.volume)}</span>
+                      <span>{formatNumber(row.amount)}</span>
+                      <span>{formatPct((row.disparity || 0) * 100)}</span>
+                    </div>
+                  ))}
+                  {tableRows.length === 0 && <div className="empty">가격 데이터가 없습니다.</div>}
                 </div>
               </div>
             </div>
