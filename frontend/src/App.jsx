@@ -40,6 +40,17 @@ const formatNumber = (value) => {
   return num.toLocaleString()
 }
 
+const formatCurrency = (value) => {
+  if (value === null || value === undefined || Number.isNaN(value)) return '-'
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '-'
+  return new Intl.NumberFormat('ko-KR', {
+    style: 'currency',
+    currency: 'KRW',
+    maximumFractionDigits: 0
+  }).format(num)
+}
+
 const formatPct = (value) => {
   if (value === null || value === undefined || Number.isNaN(value)) return '-'
   const num = Number(value)
@@ -296,7 +307,7 @@ function App() {
                   <div className="instrument-meta">{selected.market} · {selected.sector_name || 'UNKNOWN'}</div>
                 </div>
                 <div className={`delta ${delta >= 0 ? 'up' : 'down'}`}>
-                  <div className="delta-value">{formatNumber(latest?.close)}</div>
+                  <div className="delta-value">{formatCurrency(latest?.close)}</div>
                   <div className="delta-sub">{formatPct(deltaPct)}</div>
                 </div>
               </div>
@@ -304,13 +315,13 @@ function App() {
               <div className="stats-grid">
                 <div className="stat-tile">
                   <span>Close</span>
-                  <strong>{formatNumber(latest?.close)}</strong>
-                  <em>MA25 {formatNumber(latest?.ma25)}</em>
+                  <strong>{formatCurrency(latest?.close)}</strong>
+                  <em>MA25 {formatCurrency(latest?.ma25)}</em>
                 </div>
                 <div className="stat-tile">
                   <span>Volume</span>
                   <strong>{formatNumber(latest?.volume)}</strong>
-                  <em>Amount {formatNumber(latest?.amount)}</em>
+                  <em>Amount {formatCurrency(latest?.amount)}</em>
                 </div>
                 <div className="stat-tile">
                   <span>Disparity</span>
@@ -319,8 +330,8 @@ function App() {
                 </div>
                 <div className="stat-tile">
                   <span>Range</span>
-                  <strong>{formatNumber(latest?.high)} / {formatNumber(latest?.low)}</strong>
-                  <em>Open {formatNumber(latest?.open)}</em>
+                  <strong>{formatCurrency(latest?.high)} / {formatCurrency(latest?.low)}</strong>
+                  <em>Open {formatCurrency(latest?.open)}</em>
                 </div>
               </div>
 
@@ -382,12 +393,12 @@ function App() {
                   {tableRows.map((row) => (
                     <div key={row.date} className="price-row">
                       <span className="mono">{row.date}</span>
-                      <span>{formatNumber(row.open)}</span>
-                      <span>{formatNumber(row.high)}</span>
-                      <span>{formatNumber(row.low)}</span>
-                      <span className="b">{formatNumber(row.close)}</span>
+                      <span>{formatCurrency(row.open)}</span>
+                      <span>{formatCurrency(row.high)}</span>
+                      <span>{formatCurrency(row.low)}</span>
+                      <span className="b">{formatCurrency(row.close)}</span>
                       <span>{formatNumber(row.volume)}</span>
-                      <span>{formatNumber(row.amount)}</span>
+                      <span>{formatCurrency(row.amount)}</span>
                       <span>{formatPct((row.disparity || 0) * 100)}</span>
                     </div>
                   ))}
@@ -408,7 +419,7 @@ function App() {
                             <div className="plan-name">{row.name || '-'}</div>
                           </div>
                           <div className="plan-meta">
-                            <span className="plan-price">{formatNumber(row.planned_price)}</span>
+                            <span className="plan-price">{formatCurrency(row.planned_price)}</span>
                             <span className="plan-qty">x{formatNumber(row.qty)}</span>
                             <span className={`plan-status ${row.status?.toLowerCase()}`}>{row.status}</span>
                           </div>
@@ -427,7 +438,7 @@ function App() {
                             <div className="plan-name">{row.name || '-'}</div>
                           </div>
                           <div className="plan-meta">
-                            <span className="plan-price">{formatNumber(row.planned_price)}</span>
+                            <span className="plan-price">{formatCurrency(row.planned_price)}</span>
                             <span className="plan-qty">x{formatNumber(row.qty)}</span>
                             <span className={`plan-status ${row.status?.toLowerCase()}`}>{row.status}</span>
                           </div>
@@ -465,7 +476,7 @@ function App() {
                   <div key={i} className="mini-row">
                     <span className="mono">{p.code}</span>
                     <span>{p.qty}</span>
-                    <span>{formatNumber(p.avg_price)}</span>
+                    <span>{formatCurrency(p.avg_price)}</span>
                     <span>{formatTime(p.updated_at)}</span>
                   </div>
                 ))}
@@ -567,7 +578,7 @@ function App() {
                 <div><span>Disparity KOSDAQ</span><strong>{strategy.disparity_buy_kosdaq}</strong></div>
                 <div><span>Disparity Sell</span><strong>{strategy.disparity_sell}</strong></div>
                 <div><span>Stop Loss</span><strong>{strategy.stop_loss}</strong></div>
-                <div><span>Order Value</span><strong>{formatNumber(strategy.order_value)}</strong></div>
+                <div><span>Order Value</span><strong>{formatCurrency(strategy.order_value)}</strong></div>
                 <div><span>Max Holding</span><strong>{strategy.max_holding_days}</strong></div>
               </div>
             ) : (
@@ -601,27 +612,27 @@ function App() {
               <div className="account-grid">
                 <div>
                   <span>Total Assets</span>
-                  <strong>{formatNumber(accountSummary.total_assets)}</strong>
+                  <strong>{formatCurrency(accountSummary.total_assets)}</strong>
                 </div>
                 <div>
                   <span>Cash</span>
-                  <strong>{formatNumber(accountSummary.cash)}</strong>
+                  <strong>{formatCurrency(accountSummary.cash)}</strong>
                 </div>
                 <div>
                   <span>Positions Value</span>
-                  <strong>{formatNumber(accountSummary.positions_value)}</strong>
+                  <strong>{formatCurrency(accountSummary.positions_value)}</strong>
                 </div>
                 <div>
                   <span>Total PnL</span>
                   <strong className={accountSummary.total_pnl >= 0 ? 'up' : 'down'}>
-                    {formatNumber(accountSummary.total_pnl)}
+                    {formatCurrency(accountSummary.total_pnl)}
                   </strong>
                   <em>{formatPct(accountSummary.total_pnl_pct)}</em>
                 </div>
                 <div>
                   <span>Since Connected</span>
                   <strong className={sinceConnected.pnl >= 0 ? 'up' : 'down'}>
-                    {formatNumber(sinceConnected.pnl)}
+                    {formatCurrency(sinceConnected.pnl)}
                   </strong>
                   <em>{formatPct(sinceConnected.pnl_pct)}</em>
                 </div>
@@ -652,9 +663,9 @@ function App() {
                 <span className="mono">{row.code}</span>
                 <span>{row.name}</span>
                 <span>{formatNumber(row.qty)}</span>
-                <span>{formatNumber(row.avg_price)}</span>
-                <span>{formatNumber(row.last_close)}</span>
-                <span className={row.pnl >= 0 ? 'up' : 'down'}>{formatNumber(row.pnl)}</span>
+                <span>{formatCurrency(row.avg_price)}</span>
+                <span>{formatCurrency(row.last_close)}</span>
+                <span className={row.pnl >= 0 ? 'up' : 'down'}>{formatCurrency(row.pnl)}</span>
                 <span className={row.pnl_pct >= 0 ? 'up' : 'down'}>{formatPct(row.pnl_pct)}</span>
               </div>
             ))}
@@ -662,9 +673,9 @@ function App() {
           </div>
           <div className="portfolio-total">
             <span>Total</span>
-            <strong>{formatNumber(portfolioTotals.positions_value)}</strong>
+            <strong>{formatCurrency(portfolioTotals.positions_value)}</strong>
             <span className={portfolioTotals.pnl >= 0 ? 'up' : 'down'}>
-              {formatNumber(portfolioTotals.pnl)} ({formatPct(portfolioTotals.pnl_pct)})
+              {formatCurrency(portfolioTotals.pnl)} ({formatPct(portfolioTotals.pnl_pct)})
             </span>
           </div>
         </div>
