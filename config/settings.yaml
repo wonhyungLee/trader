@@ -56,7 +56,7 @@ export_csv:
   tables: []          # empty = all tables
 
 monitor:
-  enabled: false
+  enabled: true
   scan_interval_sec: 60
   rest_batch_size: 30
   rest_max_retries: 5
@@ -77,6 +77,11 @@ monitor:
 watchdog:
   enabled: true
   interval_sec: 1800
+  daily_enabled: true
+  daily_min_missing: 1
+  daily_cooldown_sec: 7200
+  daily_chunk_days: 90
+  daily_lock_file: "data/daily_loader.lock"
   accuracy_cooldown_sec: 21600
   accuracy_min_missing: 1
   accuracy_item_sleep_sec: 0.5
