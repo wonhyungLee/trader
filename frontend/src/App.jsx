@@ -147,11 +147,12 @@ function App() {
   }, [sectorFilter])
 
   useEffect(() => {
-    if (!selectionStageItems || Object.keys(selectionStageItems).length === 0) return
-    if (!selectionStageItems[activeStage]) {
+    const items = selection?.stage_items || {}
+    if (!items || Object.keys(items).length === 0) return
+    if (!items[activeStage]) {
       setActiveStage('final')
     }
-  }, [selectionStageItems, activeStage])
+  }, [selection, activeStage])
 
   const filtered = useMemo(() => {
     const target = universe.filter(u => u.group === filter)
