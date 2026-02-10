@@ -5,18 +5,22 @@ close -> open -> sync -> cancel 순으로 Next-Open 루프를 수행한다.
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import logging
+import math
 from datetime import datetime, timedelta
 from typing import Dict, List
 
 from src.utils.config import load_settings
 from src.utils.notifier import maybe_notify
 from src.utils.db_exporter import maybe_export_db
+from src.utils.project_root import ensure_repo_root
 from src.storage.sqlite_store import SQLiteStore
 from src.brokers.kis_broker import KISBroker
 from src.analyzer.backtest_runner import load_strategy
 
+os.makedirs('logs', exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -41,12 +45,14 @@ def generate_signals(store: SQLiteStore, settings: Dict) -> List[Dict]:
         return []
     # latest row per code (+ ma25_prev for trend filter)
     prices = prices.sort_values("date")
+    prices["ret3"] = prices.groupby("code")["close"].pct_change(3)
     last2 = prices.groupby("code").tail(2).copy()
     last2["ma25_prev"] = last2.groupby("code")["ma25"].shift(1)
     latest = last2.groupby("code").tail(1)
 
-    stock_info = store.conn.execute("SELECT code,name,market FROM universe_members").fetchall()
-    stock_df = {row[0]: {"name": row[1], "market": row[2]} for row in stock_info}
+    stock_info = store.conn.execute("SELECT code,name,market,group_name FROM universe_members").fetchall()
+    stock_df = {row[0]: {"name": row[1], "market": row[2], "group": row[3]} for row in stock_info}
+    group_map = {row[0]: (row[3] or "UNKNOWN") for row in stock_info}
     universe_codes = set(stock_df.keys())
     if universe_codes:
         latest = latest[latest["code"].isin(universe_codes)]
@@ -55,14 +61,31 @@ def generate_signals(store: SQLiteStore, settings: Dict) -> List[Dict]:
     latest = latest[latest["amount"] >= params.min_amount]
     latest = latest.head(params.liquidity_rank)
 
-    orders: List[Dict] = []
-    budget_per_pos = float(settings.get("trading", {}).get("order_value", 1_000_000))
+    max_positions = int(settings.get("trading", {}).get("max_positions") or getattr(params, "max_positions", 10))
+    max_per_sector = int(getattr(params, "max_per_sector", 0) or 0)
+    rank_mode = str(getattr(params, "rank_mode", "amount") or "amount").lower()
+    entry_mode = str(getattr(params, "entry_mode", "mean_reversion") or "mean_reversion").lower()
 
-    # 운영 포지션 상한(실전/백테스트 정합성). trading.max_positions가 없으면 backtest.max_positions를 사용.
-    max_positions = int(settings.get("trading", {}).get("max_positions") or settings.get("backtest", {}).get("max_positions", 10))
+    budget_per_pos = float(settings.get("trading", {}).get("order_value") or 0)
+    if budget_per_pos <= 0:
+        initial_cash = float(getattr(params, "initial_cash", 0) or 0)
+        util = float(getattr(params, "capital_utilization", 0) or 0)
+        if initial_cash > 0 and util > 0 and max_positions > 0:
+            budget_per_pos = (initial_cash * util) / max_positions
+        else:
+            budget_per_pos = 1_000_000
+
+    sector_counts: Dict[str, int] = {}
+    try:
+        held = store.conn.execute("SELECT code FROM position_state").fetchall()
+        for (code,) in held:
+            sec = group_map.get(code) or "UNKNOWN"
+            sector_counts[sec] = sector_counts.get(sec, 0) + 1
+    except Exception:
+        sector_counts = {}
+
+    candidates = []
     for _, row in latest.iterrows():
-        if len(orders) >= max_positions:
-            break
         market = stock_df.get(row["code"], {}).get("market", "KOSPI")
         buy_th = params.buy_kospi if "KOSPI" in market else params.buy_kosdaq
 
@@ -77,20 +100,62 @@ def generate_signals(store: SQLiteStore, settings: Dict) -> List[Dict]:
             except Exception:
                 continue
 
-        if row["disparity"] <= buy_th:
-            qty = int(budget_per_pos // row["close"])
-            if qty <= 0:
-                continue
-            orders.append({
-                "signal_date": today_str(),
-                "code": row["code"],
-                "side": "BUY",
-                "qty": qty,
-                "rank": len(orders) + 1,
-                "ord_dvsn": settings.get("trading", {}).get("ord_dvsn", "01"),
-                "ord_unpr": row["close"],
-            })
-    logging.info("generated %d signals", len(orders))
+        try:
+            disp = float(row.get("disparity") or 0)
+        except Exception:
+            disp = 0.0
+        try:
+            r3 = float(row.get("ret3") or 0)
+        except Exception:
+            r3 = 0.0
+
+        if entry_mode == "trend_follow":
+            if disp >= buy_th and r3 >= 0:
+                try:
+                    amt = float(row.get("amount", 0) or 0)
+                except Exception:
+                    amt = 0.0
+                score = (disp) + (0.8 * (r3)) + (0.05 * math.log1p(max(amt, 0.0)))
+                candidates.append((row["code"], group_map.get(row["code"], "UNKNOWN"), score, row))
+        else:
+            if disp <= buy_th:
+                try:
+                    amt = float(row.get("amount", 0) or 0)
+                except Exception:
+                    amt = 0.0
+                score = (-disp) + (0.8 * (-r3)) + (0.05 * math.log1p(max(amt, 0.0)))
+                candidates.append((row["code"], group_map.get(row["code"], "UNKNOWN"), score, row))
+
+    if rank_mode == "score":
+        candidates.sort(key=lambda x: x[2], reverse=True)
+
+    orders: List[Dict] = []
+    for code, sec, _score, row in candidates:
+        if max_per_sector and sector_counts.get(sec, 0) >= max_per_sector:
+            continue
+        if len(orders) >= max_positions:
+            break
+        try:
+            close = float(row["close"] or 0)
+        except Exception:
+            close = 0.0
+        if close <= 0:
+            continue
+        qty = int(budget_per_pos // close)
+        if qty <= 0:
+            continue
+        orders.append({
+            "signal_date": today_str(),
+            "code": code,
+            "side": "BUY",
+            "qty": qty,
+            "rank": len(orders) + 1,
+            "ord_dvsn": settings.get("trading", {}).get("ord_dvsn", "01"),
+            "ord_unpr": close,
+        })
+        sector_counts[sec] = sector_counts.get(sec, 0) + 1
+
+    logging.info("generated %d signals (rank_mode=%s entry_mode=%s)", len(orders), rank_mode, entry_mode)
     return orders
 
 
@@ -201,6 +266,7 @@ def cmd_cancel(store: SQLiteStore, settings: Dict, broker: KISBroker):
 
 
 def main():
+    ensure_repo_root()
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=["close", "open", "sync", "cancel"], help="실행 모드")
     args = parser.parse_args()

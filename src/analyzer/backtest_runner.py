@@ -15,16 +15,19 @@ import pandas as pd
 
 from src.storage.sqlite_store import SQLiteStore
 from src.utils.config import load_settings, load_yaml
+from src.utils.project_root import ensure_repo_root
 
 
 @dataclass
 class StrategyParams:
+    entry_mode: str
     liquidity_rank: int
     min_amount: float
     rank_mode: str
     buy_kospi: float
     buy_kosdaq: float
     sell_disparity: float
+    take_profit_ret: float
     stop_loss: float
     max_holding_days: int
     max_positions: int
@@ -46,12 +49,14 @@ def load_strategy(settings: Dict) -> StrategyParams:
     report_cfg = strat.get("report", {}) or {}
 
     return StrategyParams(
+        entry_mode=str(strat.get("entry_mode", "mean_reversion") or "mean_reversion"),
         liquidity_rank=int(strat.get("liquidity_rank", 300)),
         min_amount=float(strat.get("min_amount", 5e10)),
         rank_mode=str(strat.get("rank_mode", "amount") or "amount"),
         buy_kospi=float(buy_cfg.get("kospi_disparity", strat.get("disparity_buy_kospi", -0.05))),
         buy_kosdaq=float(buy_cfg.get("kosdaq_disparity", strat.get("disparity_buy_kosdaq", -0.10))),
         sell_disparity=float(sell_cfg.get("take_profit_disparity", strat.get("disparity_sell", -0.01))),
+        take_profit_ret=float(sell_cfg.get("take_profit_ret", strat.get("take_profit_ret", 0.0)) or 0.0),
         stop_loss=float(sell_cfg.get("stop_loss", strat.get("stop_loss", -0.05))),
         max_holding_days=int(sell_cfg.get("max_holding_days", strat.get("max_holding_days", 3))),
         max_positions=int(pos_cfg.get("max_positions", strat.get("max_positions", 10))),
@@ -71,7 +76,7 @@ def select_universe(prices: pd.DataFrame, stock_info: pd.DataFrame, params: Stra
     return merged.head(params.liquidity_rank)["code"].tolist()
 
 
-def run_backtest(store: SQLiteStore, params: StrategyParams, output_dir: Path = Path("data")):
+def run_backtest(store: SQLiteStore, params: StrategyParams, output_dir: Path = Path("data"), start_date: str | None = None, end_date: str | None = None, codes: List[str] | None = None):
     """Next-Open 백테스트.
 
     - 신호 생성: t일 종가 기준(당일 데이터로) 매수 신호 생성
@@ -89,12 +94,35 @@ def run_backtest(store: SQLiteStore, params: StrategyParams, output_dir: Path = 
     if stock_info.empty:
         raise SystemExit("universe_members is empty. Run universe_loader first.")
     market_map = dict(zip(stock_info["code"], stock_info["market"]))
+    # sector/industry mapping: prefer sector_map table if available (more granular than universe_members.group_name)
     sector_map = dict(zip(stock_info["code"], stock_info["group_name"]))
+    try:
+        sm = pd.read_sql_query("SELECT code, sector_name, industry_name FROM sector_map", store.conn)
+        if not sm.empty and "sector_name" in sm.columns:
+            sm = sm.copy()
+            sm["code"] = sm["code"].astype(str).str.zfill(6)
+            if "industry_name" in sm.columns:
+                sm["sector"] = sm["industry_name"].fillna(sm["sector_name"])
+            else:
+                sm["sector"] = sm["sector_name"]
+            sector_map.update(dict(zip(sm["code"], sm["sector"])))
+    except Exception:
+        pass
     universe_codes = set(stock_info["code"].tolist())
     if universe_codes:
         prices = prices[prices["code"].isin(universe_codes)]
 
+    # optional code/date filter (for faster focused backtests)
+    if codes:
+        code_set = set([str(c).zfill(6) for c in codes])
+        prices = prices[prices["code"].astype(str).str.zfill(6).isin(code_set)]
     prices["date"] = pd.to_datetime(prices["date"])
+    if start_date:
+        sd = pd.to_datetime(start_date) - timedelta(days=40)  # warm-up buffer for indicators
+        prices = prices[prices["date"] >= sd]
+    if end_date:
+        ed = pd.to_datetime(end_date)
+        prices = prices[prices["date"] <= ed]
     prices = prices.sort_values(["code", "date"]).copy()
     # trend filter용 (ma25 상승)
     prices["ma25_prev"] = prices.groupby("code")["ma25"].shift(1)
@@ -131,6 +159,8 @@ def run_backtest(store: SQLiteStore, params: StrategyParams, output_dir: Path = 
         return sector_map.get(code) or "UNKNOWN"
 
     # 본 루프: i는 today index, i+1은 next (체결가로 사용)
+    entry_mode = str(getattr(params, "entry_mode", "mean_reversion") or "mean_reversion").lower()
+
     for i in range(len(dates) - 1):
         d = dates[i]
         nd = dates[i + 1]
@@ -150,7 +180,13 @@ def run_backtest(store: SQLiteStore, params: StrategyParams, output_dir: Path = 
 
             ret = (exit_price / pos["avg_price"]) - 1
             should_sell = False
-            if float(today["disparity"]) >= params.sell_disparity:
+            if entry_mode == "trend_follow":
+                if float(today["disparity"]) <= params.sell_disparity:
+                    should_sell = True
+            else:
+                if float(today["disparity"]) >= params.sell_disparity:
+                    should_sell = True
+            if params.take_profit_ret and ret >= params.take_profit_ret:
                 should_sell = True
             if ret <= params.stop_loss:
                 should_sell = True
@@ -209,25 +245,34 @@ def run_backtest(store: SQLiteStore, params: StrategyParams, output_dir: Path = 
                 if ma25 <= float(ma25_prev):
                     continue
 
-            if float(disp) <= th:
-                signals_all.append(code)
+            try:
+                disp_f = float(disp)
+            except Exception:
+                disp_f = 0.0
+            try:
+                r3_f = float(r3)
+            except Exception:
+                r3_f = 0.0
 
-                # 후보 스코어(선택): 과매도 깊이 + 단기 투매 강도 + 유동성(거래대금)
-                try:
-                    amt = float(row.get("amount", 0) or 0)
-                except Exception:
-                    amt = 0.0
-                try:
-                    disp_f = float(disp)
-                except Exception:
-                    disp_f = 0.0
-                try:
-                    r3_f = float(r3)
-                except Exception:
-                    r3_f = 0.0
-
-                score = (-disp_f) + (0.8 * (-r3_f)) + (0.05 * math.log1p(max(amt, 0.0)))
-                candidates.append((code, sector_of(code), score))
+            if entry_mode == "trend_follow":
+                if disp_f >= th and r3_f >= 0:
+                    signals_all.append(code)
+                    try:
+                        amt = float(row.get("amount", 0) or 0)
+                    except Exception:
+                        amt = 0.0
+                    score = (disp_f) + (0.8 * (r3_f)) + (0.05 * math.log1p(max(amt, 0.0)))
+                    candidates.append((code, sector_of(code), score))
+            else:
+                if disp_f <= th:
+                    signals_all.append(code)
+                    # 후보 스코어(선택): 과매도 깊이 + 단기 투매 강도 + 유동성(거래대금)
+                    try:
+                        amt = float(row.get("amount", 0) or 0)
+                    except Exception:
+                        amt = 0.0
+                    score = (-disp_f) + (0.8 * (-r3_f)) + (0.05 * math.log1p(max(amt, 0.0)))
+                    candidates.append((code, sector_of(code), score))
 
         # 랭킹 정렬
         if str(params.rank_mode or "amount").lower() == "score":
@@ -281,7 +326,12 @@ def run_backtest(store: SQLiteStore, params: StrategyParams, output_dir: Path = 
             if open_price <= 0:
                 continue
 
-            qty = int(cash // (params.max_positions * open_price))
+            invest_cash = cash
+            if getattr(params, "capital_utilization", 0.0) and 0 < float(params.capital_utilization) <= 1.0:
+                invest_cash = cash * float(params.capital_utilization)
+            remaining = max(1, params.max_positions - len(positions))
+            budget = invest_cash / remaining
+            qty = int(budget // open_price)
             if qty <= 0:
                 continue
             cost = qty * open_price
@@ -346,13 +396,18 @@ def run_backtest(store: SQLiteStore, params: StrategyParams, output_dir: Path = 
 
 
 def main():
+    ensure_repo_root()
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", default="data", help="output directory for reports")
+    parser.add_argument("--start-date", default=None, help="YYYY-MM-DD (inclusive). Warm-up buffer is applied automatically.")
+    parser.add_argument("--end-date", default=None, help="YYYY-MM-DD (inclusive)")
+    parser.add_argument("--codes", default=None, help="comma-separated codes to restrict universe (e.g. 005930,000660)")
     args = parser.parse_args()
     settings = load_settings()
     params = load_strategy(settings)
     store = SQLiteStore(settings.get("database", {}).get("path", "data/market_data.db"))
-    run_backtest(store, params, output_dir=Path(args.output_dir))
+    codes = [c.strip() for c in (args.codes or "").split(",") if c.strip()] or None
+    run_backtest(store, params, output_dir=Path(args.output_dir), start_date=args.start_date, end_date=args.end_date, codes=codes)
 
 
 if __name__ == "__main__":

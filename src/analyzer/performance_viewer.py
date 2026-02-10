@@ -10,7 +10,7 @@ from pathlib import Path
 
 def load_data(base_dir: Path = Path("data")):
     equity = pd.read_csv(base_dir / "equity_curve.csv", parse_dates=["date"])
-    trades = pd.read_csv(base_dir / "trade_log.csv", parse_dates=["date"])
+    trades = pd.read_csv(base_dir / "trade_log.csv", parse_dates=["entry_date","exit_date"])
     return equity, trades
 
 
