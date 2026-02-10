@@ -8,6 +8,9 @@ import {
   fetchEngines,
   fetchOrders,
   fetchPositions,
+  fetchPortfolio,
+  fetchPlans,
+  fetchAccount,
   fetchStrategy,
   fetchJobs
 } from './api'
@@ -66,6 +69,9 @@ function App() {
   const [engines, setEngines] = useState(null)
   const [orders, setOrders] = useState([])
   const [positions, setPositions] = useState([])
+  const [portfolio, setPortfolio] = useState({ positions: [], totals: {} })
+  const [plans, setPlans] = useState({ buys: [], sells: [], exec_date: null })
+  const [account, setAccount] = useState(null)
   const [strategy, setStrategy] = useState(null)
   const [jobs, setJobs] = useState([])
   const [sectors, setSectors] = useState([])
@@ -82,6 +88,9 @@ function App() {
     fetchEngines().then(setEngines)
     fetchOrders().then(setOrders)
     fetchPositions().then(setPositions)
+    fetchPortfolio().then(setPortfolio)
+    fetchPlans().then(setPlans)
+    fetchAccount().then(setAccount)
     fetchStrategy().then(setStrategy)
     fetchJobs().then(setJobs)
     setLastUpdated(new Date())
@@ -147,6 +156,13 @@ function App() {
     { label: 'LOAN', value: accuracy.loan_trans_daily?.missing_codes || 0 },
     { label: 'VI', value: accuracy.vi_status_daily?.missing_codes || 0 }
   ]
+
+  const planBuys = plans?.buys || []
+  const planSells = plans?.sells || []
+  const accountSummary = account?.summary || {}
+  const sinceConnected = account?.since_connected || {}
+  const portfolioPositions = portfolio?.positions || []
+  const portfolioTotals = portfolio?.totals || {}
 
   const lastDate = status?.daily_price?.date?.max
   const refreshLabel = lastUpdated
@@ -378,6 +394,50 @@ function App() {
                   {tableRows.length === 0 && <div className="empty">가격 데이터가 없습니다.</div>}
                 </div>
               </div>
+
+              <div className="panel soft">
+                <div className="panel-title">Trade Plans {plans?.exec_date ? `(${plans.exec_date})` : ''}</div>
+                <div className="plan-grid">
+                  <div className="plan-column">
+                    <div className="plan-head">Buy Candidates</div>
+                    <div className="plan-list">
+                      {planBuys.slice(0, 10).map((row) => (
+                        <div key={row.id} className="plan-row">
+                          <div>
+                            <div className="mono">{row.code}</div>
+                            <div className="plan-name">{row.name || '-'}</div>
+                          </div>
+                          <div className="plan-meta">
+                            <span className="plan-price">{formatNumber(row.planned_price)}</span>
+                            <span className="plan-qty">x{formatNumber(row.qty)}</span>
+                            <span className={`plan-status ${row.status?.toLowerCase()}`}>{row.status}</span>
+                          </div>
+                        </div>
+                      ))}
+                      {planBuys.length === 0 && <div className="empty">매수 예정 종목이 없습니다.</div>}
+                    </div>
+                  </div>
+                  <div className="plan-column">
+                    <div className="plan-head">Sell Candidates</div>
+                    <div className="plan-list">
+                      {planSells.slice(0, 10).map((row) => (
+                        <div key={row.id} className="plan-row">
+                          <div>
+                            <div className="mono">{row.code}</div>
+                            <div className="plan-name">{row.name || '-'}</div>
+                          </div>
+                          <div className="plan-meta">
+                            <span className="plan-price">{formatNumber(row.planned_price)}</span>
+                            <span className="plan-qty">x{formatNumber(row.qty)}</span>
+                            <span className={`plan-status ${row.status?.toLowerCase()}`}>{row.status}</span>
+                          </div>
+                        </div>
+                      ))}
+                      {planSells.length === 0 && <div className="empty">매도 예정 종목이 없습니다.</div>}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           ) : (
             <div className="placeholder">왼쪽에서 종목을 선택하세요.</div>
@@ -435,6 +495,27 @@ function App() {
             <div className={`engine-card ${engines?.accuracy_loader?.running ? 'on' : 'off'}`}>
               <span>Accuracy</span>
               <strong>{engines?.accuracy_loader?.running ? 'RUNNING' : 'STOP'}</strong>
+            </div>
+          </div>
+
+          <div className="panel soft">
+            <div className="panel-title">Engine Snapshot</div>
+            <div className="engine-snapshot">
+              <div>
+                <span>Selection Signals</span>
+                <strong>{plans?.counts?.buys || 0} BUY / {plans?.counts?.sells || 0} SELL</strong>
+                <em>exec {plans?.exec_date || '-'}</em>
+              </div>
+              <div>
+                <span>Trader Queue</span>
+                <strong>P:{engines?.trader?.pending || 0} S:{engines?.trader?.sent || 0}</strong>
+                <em>last {engines?.trader?.last_signal || '-'}</em>
+              </div>
+              <div>
+                <span>Connected</span>
+                <strong>{account?.connected ? 'YES' : 'NO'}</strong>
+                <em>{account?.connected_at ? new Date(account.connected_at).toLocaleString('ko-KR') : '-'}</em>
+              </div>
             </div>
           </div>
 
@@ -511,6 +592,83 @@ function App() {
           </div>
         </section>
       </main>
+
+      <section className="wide-grid">
+        <div className="panel soft">
+          <div className="panel-title">Account Overview</div>
+          {account?.connected ? (
+            <>
+              <div className="account-grid">
+                <div>
+                  <span>Total Assets</span>
+                  <strong>{formatNumber(accountSummary.total_assets)}</strong>
+                </div>
+                <div>
+                  <span>Cash</span>
+                  <strong>{formatNumber(accountSummary.cash)}</strong>
+                </div>
+                <div>
+                  <span>Positions Value</span>
+                  <strong>{formatNumber(accountSummary.positions_value)}</strong>
+                </div>
+                <div>
+                  <span>Total PnL</span>
+                  <strong className={accountSummary.total_pnl >= 0 ? 'up' : 'down'}>
+                    {formatNumber(accountSummary.total_pnl)}
+                  </strong>
+                  <em>{formatPct(accountSummary.total_pnl_pct)}</em>
+                </div>
+                <div>
+                  <span>Since Connected</span>
+                  <strong className={sinceConnected.pnl >= 0 ? 'up' : 'down'}>
+                    {formatNumber(sinceConnected.pnl)}
+                  </strong>
+                  <em>{formatPct(sinceConnected.pnl_pct)}</em>
+                </div>
+              </div>
+              <div className="account-sub">
+                연결 시점: {account?.connected_at ? new Date(account.connected_at).toLocaleString('ko-KR') : '-'}
+              </div>
+            </>
+          ) : (
+            <div className="empty">자동매매 계좌 연결 정보를 불러오지 못했습니다.</div>
+          )}
+        </div>
+
+        <div className="panel soft">
+          <div className="panel-title">Portfolio</div>
+          <div className="portfolio-table">
+            <div className="portfolio-row head">
+              <span>Code</span>
+              <span>Name</span>
+              <span>Qty</span>
+              <span>Avg</span>
+              <span>Last</span>
+              <span>PnL</span>
+              <span>PnL%</span>
+            </div>
+            {portfolioPositions.slice(0, 20).map((row) => (
+              <div key={row.code} className="portfolio-row">
+                <span className="mono">{row.code}</span>
+                <span>{row.name}</span>
+                <span>{formatNumber(row.qty)}</span>
+                <span>{formatNumber(row.avg_price)}</span>
+                <span>{formatNumber(row.last_close)}</span>
+                <span className={row.pnl >= 0 ? 'up' : 'down'}>{formatNumber(row.pnl)}</span>
+                <span className={row.pnl_pct >= 0 ? 'up' : 'down'}>{formatPct(row.pnl_pct)}</span>
+              </div>
+            ))}
+            {portfolioPositions.length === 0 && <div className="empty">보유 종목이 없습니다.</div>}
+          </div>
+          <div className="portfolio-total">
+            <span>Total</span>
+            <strong>{formatNumber(portfolioTotals.positions_value)}</strong>
+            <span className={portfolioTotals.pnl >= 0 ? 'up' : 'down'}>
+              {formatNumber(portfolioTotals.pnl)} ({formatPct(portfolioTotals.pnl_pct)})
+            </span>
+          </div>
+        </div>
+      </section>
     </div>
   )
 }

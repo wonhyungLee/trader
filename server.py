@@ -5,7 +5,9 @@ import sqlite3
 import subprocess
 import json
 import logging
+import time
 from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 import numpy as np
@@ -20,6 +22,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 DB_PATH = Path('data/market_data.db')
 FRONTEND_DIST = Path('frontend/dist')
+ACCOUNT_SNAPSHOT_PATH = Path('data/account_snapshot.json')
+_balance_cache: Dict[str, Any] = {"ts": 0.0, "data": None}
 
 app = Flask(__name__, static_folder=str(FRONTEND_DIST), static_url_path='')
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -78,6 +82,164 @@ def _read_accuracy_progress() -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, str):
+            value = value.replace(",", "").strip()
+        return float(value)
+    except Exception:
+        return None
+
+
+def _pick_float(payload: Dict[str, Any], keys: Tuple[str, ...]) -> Optional[float]:
+    for key in keys:
+        if key in payload:
+            val = _safe_float(payload.get(key))
+            if val is not None:
+                return val
+    return None
+
+
+def _latest_price_map(conn: sqlite3.Connection, codes: list[str]) -> Dict[str, Dict[str, Any]]:
+    if not codes:
+        return {}
+    placeholder = ",".join("?" * len(codes))
+    sql = f"""
+        SELECT d.code, d.close, d.date
+        FROM daily_price d
+        JOIN (
+            SELECT code, MAX(date) AS max_date
+            FROM daily_price
+            WHERE code IN ({placeholder})
+            GROUP BY code
+        ) m
+        ON d.code = m.code AND d.date = m.max_date
+    """
+    rows = conn.execute(sql, tuple(codes)).fetchall()
+    out: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        out[row[0]] = {"close": row[1], "date": row[2]}
+    return out
+
+
+def _load_account_snapshot() -> Optional[Dict[str, Any]]:
+    if not ACCOUNT_SNAPSHOT_PATH.exists():
+        return None
+    try:
+        return json.loads(ACCOUNT_SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _save_account_snapshot(total_assets: Optional[float]) -> Optional[Dict[str, Any]]:
+    if total_assets is None:
+        return None
+    if ACCOUNT_SNAPSHOT_PATH.exists():
+        return _load_account_snapshot()
+    snapshot = {
+        "connected_at": pd.Timestamp.utcnow().isoformat(),
+        "initial_total": total_assets,
+    }
+    try:
+        ACCOUNT_SNAPSHOT_PATH.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    return snapshot
+
+
+def _fetch_live_balance(settings: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    try:
+        from src.brokers.kis_broker import KISBroker
+    except Exception:
+        return None
+    try:
+        broker = KISBroker(settings)
+        return broker.get_balance()
+    except Exception:
+        return None
+
+
+def _build_account_summary(conn: sqlite3.Connection, settings: Dict[str, Any]) -> Dict[str, Any]:
+    now_ts = time.time()
+    if _balance_cache.get("data") and now_ts - _balance_cache.get("ts", 0) < 120:
+        return _balance_cache["data"]
+
+    resp = _fetch_live_balance(settings)
+    if not resp:
+        data = {"connected": False, "reason": "balance_unavailable"}
+        _balance_cache.update({"ts": now_ts, "data": data})
+        return data
+
+    output2 = resp.get("output2") or resp.get("output") or []
+    summary = output2[0] if isinstance(output2, list) and output2 else (output2 if isinstance(output2, dict) else {})
+    cash = _pick_float(summary, ("prcs_bal", "dnca_tot_amt", "cash_bal", "cash_bal_amt"))
+    total_eval = _pick_float(summary, ("tot_evlu_amt", "tot_evlu_amt", "tot_asst_evlu_amt"))
+    total_pnl = _pick_float(summary, ("tot_pfls", "tot_pfls_amt", "tot_pfls_amt"))
+
+    positions = resp.get("output1") or []
+    codes = []
+    parsed_positions = []
+    for p in positions:
+        code = p.get("pdno") or p.get("PDNO")
+        if not code:
+            continue
+        codes.append(code)
+        parsed_positions.append({
+            "code": code,
+            "name": p.get("prdt_name") or p.get("PRDT_NAME") or "",
+            "qty": int(float(p.get("hldg_qty") or p.get("HLDG_QTY") or 0)),
+            "avg_price": _safe_float(p.get("pchs_avg_pric") or p.get("PCHS_AVG_PRIC")),
+            "eval_amount": _safe_float(p.get("evlu_amt") or p.get("EVLU_AMT")),
+        })
+
+    price_map = _latest_price_map(conn, list(set(codes)))
+    positions_value = 0.0
+    for p in parsed_positions:
+        if p["eval_amount"] is not None:
+            positions_value += p["eval_amount"]
+            continue
+        last_close = price_map.get(p["code"], {}).get("close")
+        if last_close is not None:
+            positions_value += last_close * (p["qty"] or 0)
+
+    if total_eval is None:
+        total_eval = (cash or 0.0) + positions_value
+    if total_pnl is None and total_eval is not None:
+        # approximate PnL using cost basis from positions
+        cost = sum((p.get("avg_price") or 0) * (p.get("qty") or 0) for p in parsed_positions)
+        total_pnl = total_eval - cost if cost else None
+
+    snapshot = _save_account_snapshot(total_eval)
+    since_pnl = None
+    since_pct = None
+    connected_at = None
+    if snapshot and total_eval is not None:
+        connected_at = snapshot.get("connected_at")
+        initial_total = snapshot.get("initial_total") or 0
+        since_pnl = total_eval - initial_total
+        since_pct = (since_pnl / initial_total * 100) if initial_total else None
+
+    data = {
+        "connected": True,
+        "connected_at": connected_at,
+        "summary": {
+            "cash": cash,
+            "positions_value": positions_value,
+            "total_assets": total_eval,
+            "total_pnl": total_pnl,
+            "total_pnl_pct": (total_pnl / total_eval * 100) if total_pnl is not None and total_eval else None,
+        },
+        "since_connected": {
+            "pnl": since_pnl,
+            "pnl_pct": since_pct,
+        },
+    }
+    _balance_cache.update({"ts": now_ts, "data": data})
+    return data
 
 def _read_accuracy_lock() -> dict:
     path = Path("data/accuracy_loader.lock")
@@ -221,6 +383,114 @@ def positions():
     )
     return jsonify(df.to_dict(orient='records'))
 
+
+@app.get('/portfolio')
+def portfolio():
+    conn = get_conn()
+    df = pd.read_sql_query(
+        """
+        SELECT p.code, p.name, p.qty, p.avg_price, p.entry_date, p.updated_at,
+               u.market, s.sector_name, s.industry_name
+        FROM position_state p
+        LEFT JOIN universe_members u ON p.code = u.code
+        LEFT JOIN sector_map s ON p.code = s.code
+        ORDER BY p.updated_at DESC
+        """,
+        conn,
+    )
+    codes = df["code"].dropna().astype(str).unique().tolist()
+    price_map = _latest_price_map(conn, codes)
+    records = []
+    total_value = 0.0
+    total_cost = 0.0
+    for row in df.to_dict(orient="records"):
+        code = row.get("code")
+        last = price_map.get(code, {})
+        last_close = last.get("close")
+        last_date = last.get("date")
+        qty = float(row.get("qty") or 0)
+        avg_price = float(row.get("avg_price") or 0)
+        cost = qty * avg_price if qty and avg_price else None
+        market_value = qty * last_close if qty and last_close is not None else None
+        pnl = market_value - cost if market_value is not None and cost is not None else None
+        pnl_pct = (pnl / cost * 100) if pnl is not None and cost else None
+        if market_value is not None:
+            total_value += market_value
+        if cost is not None:
+            total_cost += cost
+        row.update({
+            "last_close": last_close,
+            "last_date": last_date,
+            "market_value": market_value,
+            "pnl": pnl,
+            "pnl_pct": pnl_pct,
+        })
+        records.append(row)
+    totals = {
+        "positions_value": total_value,
+        "cost": total_cost,
+        "pnl": total_value - total_cost if total_cost else None,
+        "pnl_pct": ((total_value - total_cost) / total_cost * 100) if total_cost else None,
+    }
+    return jsonify({"positions": records, "totals": totals})
+
+
+@app.get('/plans')
+def plans():
+    conn = get_conn()
+    exec_date = request.args.get("exec_date")
+    if not exec_date:
+        try:
+            exec_date = conn.execute("SELECT MAX(exec_date) FROM order_queue").fetchone()[0]
+        except Exception:
+            exec_date = None
+    if not exec_date:
+        return jsonify({"exec_date": None, "buys": [], "sells": []})
+    df = pd.read_sql_query(
+        """
+        SELECT o.id, o.signal_date, o.exec_date, o.code, o.side, o.qty, o.rank, o.status,
+               o.ord_dvsn, o.ord_unpr, o.created_at, o.updated_at,
+               u.name, u.market, s.sector_name, s.industry_name
+        FROM order_queue o
+        LEFT JOIN universe_members u ON o.code = u.code
+        LEFT JOIN sector_map s ON o.code = s.code
+        WHERE o.exec_date = ? AND o.status IN ('PENDING','SENT','PARTIAL','NOT_FOUND')
+        ORDER BY o.rank ASC, o.id ASC
+        """,
+        conn,
+        params=(exec_date,),
+    )
+    codes = df["code"].dropna().astype(str).unique().tolist()
+    price_map = _latest_price_map(conn, codes)
+    buys = []
+    sells = []
+    for row in df.to_dict(orient="records"):
+        code = row.get("code")
+        last = price_map.get(code, {})
+        planned_price = row.get("ord_unpr") if row.get("ord_unpr") else last.get("close")
+        row.update({
+            "planned_price": planned_price,
+            "last_close": last.get("close"),
+            "last_date": last.get("date"),
+        })
+        if row.get("side") == "SELL":
+            sells.append(row)
+        else:
+            buys.append(row)
+    return jsonify({
+        "exec_date": exec_date,
+        "buys": buys,
+        "sells": sells,
+        "counts": {"buys": len(buys), "sells": len(sells)},
+    })
+
+
+@app.get('/account')
+def account():
+    conn = get_conn()
+    settings = load_settings()
+    return jsonify(_build_account_summary(conn, settings))
+
 @app.get('/status')
 def status():
     conn = get_conn()
@@ -319,6 +589,9 @@ def _register_bnf_aliases():
         ("/signals", signals, ["GET"]),
         ("/orders", orders, ["GET"]),
         ("/positions", positions, ["GET"]),
+        ("/portfolio", portfolio, ["GET"]),
+        ("/plans", plans, ["GET"]),
+        ("/account", account, ["GET"]),
         ("/status", status, ["GET"]),
         ("/jobs", jobs, ["GET"]),
         ("/engines", engines, ["GET"]),
