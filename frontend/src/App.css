@@ -240,6 +240,31 @@ body {
   margin-bottom: 16px;
 }
 
+.panel-tabs {
+  display: inline-flex;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--line);
+  padding: 4px;
+  border-radius: 999px;
+}
+
+.panel-tabs button {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.panel-tabs button.active {
+  background: rgba(34, 211, 238, 0.2);
+  color: var(--text);
+}
+
 .panel-header h2 {
   margin: 0;
   font-size: 20px;
@@ -337,6 +362,12 @@ body {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.scan-board {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .panel-badges {

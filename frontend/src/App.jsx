@@ -80,6 +80,7 @@ function App() {
   const [universe, setUniverse] = useState([])
   const [filter, setFilter] = useState('KOSPI100')
   const [selected, setSelected] = useState(null)
+  const [focusTab, setFocusTab] = useState('scan')
   const [prices, setPrices] = useState([])
   const [pricesLoading, setPricesLoading] = useState(false)
   const [days, setDays] = useState(120)
@@ -197,6 +198,8 @@ function App() {
   const selectionCandidates = selection?.candidates || []
   const selectionPricing = selection?.pricing || {}
   const selectionStageItems = selection?.stage_items || {}
+  const scanMode = selection?.mode || 'DAILY'
+  const scanModeReason = selection?.mode_reason
 
   const formatStageValue = (stage) => {
     if (!stage) return '-'
@@ -321,20 +324,173 @@ function App() {
         <section className="panel focus-panel">
           <div className="panel-header">
             <div>
-              <h2>Instrument</h2>
-              <p>선택 종목 상세</p>
+              <h2>Scan & Trade</h2>
+              <p>{scanMode} Mode {scanModeReason ? `· ${scanModeReason}` : ''}</p>
             </div>
-            <div className="panel-badges">
-              <span className={`status-pill ${engines?.monitor?.running ? 'on' : 'off'}`}>
-                MONITOR {engines?.monitor?.running ? 'ON' : 'OFF'}
-              </span>
-              <span className={`status-pill ${engines?.accuracy_loader?.running ? 'on' : 'off'}`}>
-                ACC {engines?.accuracy_loader?.running ? 'ON' : 'OFF'}
-              </span>
+            <div className="panel-tabs">
+              <button className={focusTab === 'scan' ? 'active' : ''} onClick={() => setFocusTab('scan')}>Scan</button>
+              <button className={focusTab === 'instrument' ? 'active' : ''} onClick={() => setFocusTab('instrument')}>Instrument</button>
             </div>
           </div>
 
-          {selected ? (
+          {focusTab === 'scan' ? (
+            <div className="scan-board">
+              <div className="panel-badges">
+                <span className={`status-pill ${engines?.monitor?.running ? 'on' : 'off'}`}>
+                  MONITOR {engines?.monitor?.running ? 'ON' : 'OFF'}
+                </span>
+                <span className={`status-pill ${engines?.accuracy_loader?.running ? 'on' : 'off'}`}>
+                  ACC {engines?.accuracy_loader?.running ? 'ON' : 'OFF'}
+                </span>
+                <span className="status-pill">{selection?.date || '-'}</span>
+              </div>
+
+              <div className="plan-grid">
+                <div className="plan-column">
+                  <div className="plan-head">Buy Candidates</div>
+                  <div className="plan-list">
+                    {planBuys.slice(0, 8).map((row) => (
+                      <div key={row.id} className="plan-row">
+                        <div>
+                          <div className="mono">{row.code}</div>
+                          <div className="plan-name">{row.name || '-'}</div>
+                        </div>
+                        <div className="plan-meta">
+                          <span className="plan-price">{formatCurrency(row.planned_price)}</span>
+                          <span className="plan-qty">x{formatNumber(row.qty)}</span>
+                          <span className={`plan-status ${row.status?.toLowerCase()}`}>{row.status}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {planBuys.length === 0 && <div className="empty">매수 예정 종목이 없습니다.</div>}
+                  </div>
+                </div>
+                <div className="plan-column">
+                  <div className="plan-head">Sell Candidates</div>
+                  <div className="plan-list">
+                    {planSells.slice(0, 8).map((row) => (
+                      <div key={row.id} className="plan-row">
+                        <div>
+                          <div className="mono">{row.code}</div>
+                          <div className="plan-name">{row.name || '-'}</div>
+                        </div>
+                        <div className="plan-meta">
+                          <span className="plan-price">{formatCurrency(row.planned_price)}</span>
+                          <span className="plan-qty">x{formatNumber(row.qty)}</span>
+                          <span className={`plan-status ${row.status?.toLowerCase()}`}>{row.status}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {planSells.length === 0 && <div className="empty">매도 예정 종목이 없습니다.</div>}
+                  </div>
+                </div>
+              </div>
+
+              <div className="pipeline-flow">
+                {selectionStages.map((stage, idx) => {
+                  const isActive = activeStage === stage.key
+                  return (
+                    <button
+                      key={stage.key}
+                      className={`pipeline-step ${isActive ? 'active' : ''}`}
+                      onClick={() => setActiveStage(stage.key)}
+                      type="button"
+                    >
+                      <div className="pipeline-label">{stage.label}</div>
+                      <div className="pipeline-count">{stage.count}</div>
+                      <div className="pipeline-value">{formatStageValue(stage)}</div>
+                      <div className="pipeline-bar">
+                        <span style={{ width: selectionStages[0]?.count ? `${(stage.count / selectionStages[0].count) * 100}%` : '0%' }} />
+                      </div>
+                      {idx < selectionStages.length - 1 && <div className="pipeline-arrow">→</div>}
+                    </button>
+                  )
+                })}
+                {selectionStages.length === 0 && <div className="empty">선정 파이프라인 데이터를 불러오지 못했습니다.</div>}
+              </div>
+
+              <div className="pricing-box">
+                <div className="pricing-title">Price Decision Logic</div>
+                <div className="pricing-grid">
+                  <div>
+                    <span>Price Source</span>
+                    <strong>{selectionPricing.price_source || 'close'}</strong>
+                  </div>
+                  <div>
+                    <span>Order Value</span>
+                    <strong>{formatCurrency(selectionPricing.order_value)}</strong>
+                  </div>
+                  <div>
+                    <span>Qty Formula</span>
+                    <strong>{selectionPricing.qty_formula || 'order_value / close'}</strong>
+                  </div>
+                  <div>
+                    <span>Order Type</span>
+                    <strong>{selectionPricing.ord_dvsn || '-'}</strong>
+                  </div>
+                  <div>
+                    <span>Sell Take Profit</span>
+                    <strong>{formatPct((selectionPricing.sell_rules?.take_profit_disparity || 0) * 100)}</strong>
+                  </div>
+                  <div>
+                    <span>Sell Stop Loss</span>
+                    <strong>{formatPct((selectionPricing.sell_rules?.stop_loss || 0) * 100)}</strong>
+                  </div>
+                  <div>
+                    <span>Max Holding</span>
+                    <strong>{selectionPricing.sell_rules?.max_holding_days || '-'} days</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div className="candidate-table">
+                <div className="candidate-row head">
+                  <span>Rank</span>
+                  <span>Code</span>
+                  <span>Name</span>
+                  <span>Amount</span>
+                  <span>Disparity</span>
+                  <span>Close</span>
+                </div>
+                {selectionCandidates.slice(0, 12).map((row) => (
+                  <div key={row.code} className="candidate-row">
+                    <span>{row.rank}</span>
+                    <span className="mono">{row.code}</span>
+                    <span>{row.name}</span>
+                    <span>{formatCurrency(row.amount)}</span>
+                    <span className={row.disparity <= 0 ? 'down' : 'up'}>{formatPct((row.disparity || 0) * 100)}</span>
+                    <span>{formatCurrency(row.close)}</span>
+                  </div>
+                ))}
+                {selectionCandidates.length === 0 && <div className="empty">현재 선정된 후보가 없습니다.</div>}
+              </div>
+
+              <div className="stage-table">
+                <div className="stage-title">
+                  Stage Detail: {selectionStages.find(s => s.key === activeStage)?.label || 'N/A'}
+                </div>
+                <div className="stage-row head">
+                  <span>Code</span>
+                  <span>Name</span>
+                  <span>Amount</span>
+                  <span>Disparity</span>
+                  <span>Close</span>
+                </div>
+                {(selectionStageItems[activeStage] || []).slice(0, 12).map((row) => (
+                  <div key={`${activeStage}-${row.code}`} className="stage-row">
+                    <span className="mono">{row.code}</span>
+                    <span>{row.name}</span>
+                    <span>{formatCurrency(row.amount)}</span>
+                    <span className={row.disparity <= 0 ? 'down' : 'up'}>{formatPct((row.disparity || 0) * 100)}</span>
+                    <span>{formatCurrency(row.close)}</span>
+                  </div>
+                ))}
+                {(selectionStageItems[activeStage] || []).length === 0 && (
+                  <div className="empty">해당 단계에 표시할 종목이 없습니다.</div>
+                )}
+              </div>
+            </div>
+          ) : selected ? (
             <div className="instrument">
               <div className="instrument-head">
                 <div>
@@ -442,49 +598,6 @@ function App() {
                 </div>
               </div>
 
-              <div className="panel soft">
-                <div className="panel-title">Trade Plans {plans?.exec_date ? `(${plans.exec_date})` : ''}</div>
-                <div className="plan-grid">
-                  <div className="plan-column">
-                    <div className="plan-head">Buy Candidates</div>
-                    <div className="plan-list">
-                      {planBuys.slice(0, 10).map((row) => (
-                        <div key={row.id} className="plan-row">
-                          <div>
-                            <div className="mono">{row.code}</div>
-                            <div className="plan-name">{row.name || '-'}</div>
-                          </div>
-                          <div className="plan-meta">
-                            <span className="plan-price">{formatCurrency(row.planned_price)}</span>
-                            <span className="plan-qty">x{formatNumber(row.qty)}</span>
-                            <span className={`plan-status ${row.status?.toLowerCase()}`}>{row.status}</span>
-                          </div>
-                        </div>
-                      ))}
-                      {planBuys.length === 0 && <div className="empty">매수 예정 종목이 없습니다.</div>}
-                    </div>
-                  </div>
-                  <div className="plan-column">
-                    <div className="plan-head">Sell Candidates</div>
-                    <div className="plan-list">
-                      {planSells.slice(0, 10).map((row) => (
-                        <div key={row.id} className="plan-row">
-                          <div>
-                            <div className="mono">{row.code}</div>
-                            <div className="plan-name">{row.name || '-'}</div>
-                          </div>
-                          <div className="plan-meta">
-                            <span className="plan-price">{formatCurrency(row.planned_price)}</span>
-                            <span className="plan-qty">x{formatNumber(row.qty)}</span>
-                            <span className={`plan-status ${row.status?.toLowerCase()}`}>{row.status}</span>
-                          </div>
-                        </div>
-                      ))}
-                      {planSells.length === 0 && <div className="empty">매도 예정 종목이 없습니다.</div>}
-                    </div>
-                  </div>
-                </div>
-              </div>
             </div>
           ) : (
             <div className="placeholder">왼쪽에서 종목을 선택하세요.</div>
@@ -716,112 +829,6 @@ function App() {
           </div>
         </div>
 
-        <div className="panel soft">
-          <div className="panel-title">Selection Pipeline</div>
-          <div className="pipeline-flow">
-            {selectionStages.map((stage, idx) => {
-              const isActive = activeStage === stage.key
-              return (
-                <button
-                  key={stage.key}
-                  className={`pipeline-step ${isActive ? 'active' : ''}`}
-                  onClick={() => setActiveStage(stage.key)}
-                  type="button"
-                >
-                  <div className="pipeline-label">{stage.label}</div>
-                  <div className="pipeline-count">{stage.count}</div>
-                  <div className="pipeline-value">{formatStageValue(stage)}</div>
-                  <div className="pipeline-bar">
-                    <span style={{ width: selectionStages[0]?.count ? `${(stage.count / selectionStages[0].count) * 100}%` : '0%' }} />
-                  </div>
-                  {idx < selectionStages.length - 1 && <div className="pipeline-arrow">→</div>}
-                </button>
-              )
-            })}
-            {selectionStages.length === 0 && <div className="empty">선정 파이프라인 데이터를 불러오지 못했습니다.</div>}
-          </div>
-
-          <div className="pricing-box">
-            <div className="pricing-title">Price Decision Logic</div>
-            <div className="pricing-grid">
-              <div>
-                <span>Price Source</span>
-                <strong>{selectionPricing.price_source || 'close'}</strong>
-              </div>
-              <div>
-                <span>Order Value</span>
-                <strong>{formatCurrency(selectionPricing.order_value)}</strong>
-              </div>
-              <div>
-                <span>Qty Formula</span>
-                <strong>{selectionPricing.qty_formula || 'order_value / close'}</strong>
-              </div>
-              <div>
-                <span>Order Type</span>
-                <strong>{selectionPricing.ord_dvsn || '-'}</strong>
-              </div>
-              <div>
-                <span>Sell Take Profit</span>
-                <strong>{formatPct((selectionPricing.sell_rules?.take_profit_disparity || 0) * 100)}</strong>
-              </div>
-              <div>
-                <span>Sell Stop Loss</span>
-                <strong>{formatPct((selectionPricing.sell_rules?.stop_loss || 0) * 100)}</strong>
-              </div>
-              <div>
-                <span>Max Holding</span>
-                <strong>{selectionPricing.sell_rules?.max_holding_days || '-'} days</strong>
-              </div>
-            </div>
-          </div>
-
-          <div className="candidate-table">
-            <div className="candidate-row head">
-              <span>Rank</span>
-              <span>Code</span>
-              <span>Name</span>
-              <span>Amount</span>
-              <span>Disparity</span>
-              <span>Close</span>
-            </div>
-            {selectionCandidates.slice(0, 12).map((row) => (
-              <div key={row.code} className="candidate-row">
-                <span>{row.rank}</span>
-                <span className="mono">{row.code}</span>
-                <span>{row.name}</span>
-                <span>{formatCurrency(row.amount)}</span>
-                <span className={row.disparity <= 0 ? 'down' : 'up'}>{formatPct((row.disparity || 0) * 100)}</span>
-                <span>{formatCurrency(row.close)}</span>
-              </div>
-            ))}
-            {selectionCandidates.length === 0 && <div className="empty">현재 선정된 후보가 없습니다.</div>}
-          </div>
-
-          <div className="stage-table">
-            <div className="stage-title">
-              Stage Detail: {selectionStages.find(s => s.key === activeStage)?.label || 'N/A'}
-            </div>
-            <div className="stage-row head">
-              <span>Code</span>
-              <span>Name</span>
-              <span>Amount</span>
-              <span>Disparity</span>
-              <span>Close</span>
-            </div>
-            {(selectionStageItems[activeStage] || []).slice(0, 12).map((row) => (
-              <div key={`${activeStage}-${row.code}`} className="stage-row">
-                <span className="mono">{row.code}</span>
-                <span>{row.name}</span>
-                <span>{formatCurrency(row.amount)}</span>
-                <span className={row.disparity <= 0 ? 'down' : 'up'}>{formatPct((row.disparity || 0) * 100)}</span>
-                <span>{formatCurrency(row.close)}</span>
-              </div>
-            ))}
-            {(selectionStageItems[activeStage] || []).length === 0 && (
-              <div className="empty">해당 단계에 표시할 종목이 없습니다.</div>
-            )}
-          </div>
-        </div>
       </section>
     </div>
   )

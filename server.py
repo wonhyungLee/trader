@@ -25,6 +25,8 @@ CLIENT_ERROR_LOG = Path("logs/client_error.log")
 DB_PATH = Path('data/market_data.db')
 FRONTEND_DIST = Path('frontend/dist')
 ACCOUNT_SNAPSHOT_PATH = Path('data/account_snapshot.json')
+REALTIME_SCAN_PATH = Path("data/realtime_scan.json")
+SCAN_FALLBACK_PATH = Path("data/scan_fallback.json")
 _balance_cache: Dict[str, Any] = {"ts": 0.0, "data": None}
 _selection_cache: Dict[str, Any] = {"ts": 0.0, "data": None}
 
@@ -154,6 +156,15 @@ def _save_account_snapshot(total_assets: Optional[float]) -> Optional[Dict[str, 
     return snapshot
 
 
+def _read_json(path: Path) -> Optional[Dict[str, Any]]:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 def _fetch_live_balance(settings: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     try:
         from src.brokers.kis_broker import KISBroker
@@ -251,6 +262,31 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
         return _selection_cache["data"]
 
     params = load_strategy(settings)
+    mode = "DAILY"
+    mode_reason = "daily_close"
+    realtime_updated_at = None
+
+    fallback = _read_json(SCAN_FALLBACK_PATH) or {}
+    fallback_until = fallback.get("until")
+    if fallback_until:
+        try:
+            until_ts = pd.to_datetime(fallback_until).timestamp()
+            if time.time() < until_ts:
+                mode = "DAILY"
+                mode_reason = "rate_limit"
+        except Exception:
+            pass
+
+    realtime = _read_json(REALTIME_SCAN_PATH) or {}
+    if realtime and mode_reason != "rate_limit":
+        realtime_updated_at = realtime.get("updated_at") or realtime.get("timestamp")
+        try:
+            rt_ts = pd.to_datetime(realtime_updated_at).timestamp() if realtime_updated_at else 0
+            if rt_ts and (time.time() - rt_ts) < 120:
+                mode = "REALTIME"
+                mode_reason = "realtime_scan"
+        except Exception:
+            pass
     min_amount = float(getattr(params, "min_amount", 0) or 0)
     liquidity_rank = int(getattr(params, "liquidity_rank", 0) or 0)
     buy_kospi = float(getattr(params, "buy_kospi", 0) or 0)
@@ -347,6 +383,9 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
 
     data = {
         "date": latest_date,
+        "mode": mode,
+        "mode_reason": mode_reason,
+        "realtime_updated_at": realtime_updated_at,
         "stages": stages,
         "candidates": candidates,
         "stage_items": {
