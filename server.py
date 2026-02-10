@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 
 import pandas as pd
+import numpy as np
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
@@ -183,6 +184,9 @@ def prices():
         conn,
         params=(code, days),
     )
+    # Ensure JSON-safe values (NaN/inf -> null)
+    df = df.replace([np.inf, -np.inf], np.nan)
+    df = df.astype(object).where(pd.notnull(df), None)
     return jsonify(df.to_dict(orient='records'))
 
 @app.get('/signals')
