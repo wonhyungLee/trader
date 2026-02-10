@@ -100,8 +100,18 @@ def _read_accuracy_lock() -> dict:
 def serve_index():
     return send_from_directory(app.static_folder, 'index.html')
 
+@app.route('/bnf')
+def serve_index_bnf():
+    return send_from_directory(app.static_folder, 'index.html')
+
 @app.route('/<path:path>')
 def serve_static(path):
+    if (FRONTEND_DIST / path).exists():
+        return send_from_directory(app.static_folder, path)
+    return send_from_directory(app.static_folder, 'index.html')
+
+@app.route('/bnf/<path:path>')
+def serve_static_bnf(path):
     if (FRONTEND_DIST / path).exists():
         return send_from_directory(app.static_folder, path)
     return send_from_directory(app.static_folder, 'index.html')
@@ -296,7 +306,27 @@ def export_csv():
     maybe_export_db(settings, str(DB_PATH))
     return jsonify({"status": "success", "message": "CSV export completed"})
 
+
+def _register_bnf_aliases():
+    aliases = [
+        ("/universe", universe, ["GET"]),
+        ("/sectors", sectors, ["GET"]),
+        ("/prices", prices, ["GET"]),
+        ("/signals", signals, ["GET"]),
+        ("/orders", orders, ["GET"]),
+        ("/positions", positions, ["GET"]),
+        ("/status", status, ["GET"]),
+        ("/jobs", jobs, ["GET"]),
+        ("/engines", engines, ["GET"]),
+        ("/strategy", strategy, ["GET"]),
+        ("/export", export_csv, ["POST"]),
+    ]
+    for path, view, methods in aliases:
+        endpoint = f"bnf_{path.strip('/').replace('/', '_')}"
+        app.add_url_rule(f"/bnf{path}", endpoint=endpoint, view_func=view, methods=methods)
+
 if __name__ == '__main__':
+    _register_bnf_aliases()
     host = os.getenv("BNFK_API_HOST", "0.0.0.0")
     port = int(os.getenv("BNFK_API_PORT", "5001"))
     app.run(host=host, port=port)
