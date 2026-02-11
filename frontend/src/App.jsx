@@ -3,17 +3,10 @@ import {
   fetchUniverse,
   fetchSectors,
   fetchPrices,
-  fetchSignals,
-  fetchStatus,
-  fetchEngines,
-  fetchOrders,
-  fetchPositions,
-  fetchPortfolio,
   fetchPlans,
   fetchAccount,
   fetchSelection,
-  fetchStrategy,
-  fetchJobs,
+  fetchPortfolio,
   fetchKisKeys,
   updateKisKeyToggle
 } from './api'
@@ -84,22 +77,13 @@ function App() {
   const [universe, setUniverse] = useState([])
   const [filter, setFilter] = useState('KOSPI100')
   const [selected, setSelected] = useState(null)
-  const [focusTab, setFocusTab] = useState('scan')
   const [prices, setPrices] = useState([])
   const [pricesLoading, setPricesLoading] = useState(false)
   const [days, setDays] = useState(120)
-  const [signals, setSignals] = useState([])
-  const [status, setStatus] = useState(null)
-  const [engines, setEngines] = useState(null)
-  const [orders, setOrders] = useState([])
-  const [positions, setPositions] = useState([])
-  const [portfolio, setPortfolio] = useState({ positions: [], totals: {} })
   const [plans, setPlans] = useState({ buys: [], sells: [], exec_date: null })
   const [account, setAccount] = useState(null)
   const [selection, setSelection] = useState({ stages: [], candidates: [], pricing: {} })
-  const [activeStage, setActiveStage] = useState('final')
-  const [strategy, setStrategy] = useState(null)
-  const [jobs, setJobs] = useState([])
+  const [portfolio, setPortfolio] = useState({ positions: [], totals: {} })
   const [sectors, setSectors] = useState([])
   const [sectorFilter, setSectorFilter] = useState('ALL')
   const [search, setSearch] = useState('')
@@ -111,11 +95,6 @@ function App() {
     const sector = typeof sectorOverride === 'string' ? sectorOverride : sectorFilter
     fetchUniverse(sector && sector !== 'ALL' ? sector : undefined).then((data) => setUniverse(asArray(data)))
     fetchSectors().then((data) => setSectors(asArray(data)))
-    fetchSignals().then((data) => setSignals(asArray(data)))
-    fetchStatus().then((data) => setStatus(data && typeof data === 'object' ? data : null))
-    fetchEngines().then((data) => setEngines(data && typeof data === 'object' ? data : null))
-    fetchOrders().then((data) => setOrders(asArray(data)))
-    fetchPositions().then((data) => setPositions(asArray(data)))
     fetchPortfolio().then((data) => {
       const payload = data && typeof data === 'object' ? data : {}
       setPortfolio({
@@ -147,8 +126,6 @@ function App() {
         stage_items: payload.stage_items && typeof payload.stage_items === 'object' ? payload.stage_items : {},
       })
     })
-    fetchStrategy().then((data) => setStrategy(data && typeof data === 'object' ? data : null))
-    fetchJobs().then((data) => setJobs(asArray(data)))
     fetchKisKeys().then((data) => setKisKeys(asArray(data))).catch(() => setKisKeys([]))
     setLastUpdated(new Date())
   }
@@ -181,14 +158,6 @@ function App() {
     setSelected(null)
   }, [sectorFilter])
 
-  useEffect(() => {
-    const items = selection?.stage_items || {}
-    if (!items || Object.keys(items).length === 0) return
-    if (!items[activeStage]) {
-      setActiveStage('final')
-    }
-  }, [selection, activeStage])
-
   const filtered = useMemo(() => {
     const target = asArray(universe).filter(u => u.group === filter)
     const keyword = search.trim().toLowerCase()
@@ -212,29 +181,16 @@ function App() {
   const delta = latest && previous ? latest.close - previous.close : 0
   const deltaPct = latest && previous && previous.close ? (delta / previous.close) * 100 : 0
 
-  const accuracy = status?.accuracy || {}
-  const accuracyRows = [
-    { label: 'INV', value: accuracy.investor_flow_daily?.missing_codes || 0 },
-    { label: 'PROG', value: accuracy.program_trade_daily?.missing_codes || 0 },
-    { label: 'SHORT', value: accuracy.short_sale_daily?.missing_codes || 0 },
-    { label: 'CREDIT', value: accuracy.credit_balance_daily?.missing_codes || 0 },
-    { label: 'LOAN', value: accuracy.loan_trans_daily?.missing_codes || 0 },
-    { label: 'VI', value: accuracy.vi_status_daily?.missing_codes || 0 }
-  ]
-
   const planBuys = asArray(plans?.buys)
-  const planSells = asArray(plans?.sells)
   const accountSummary = account?.summary || {}
-  const sinceConnected = account?.since_connected || {}
   const portfolioPositions = asArray(portfolio?.positions)
   const portfolioTotals = portfolio?.totals || {}
   const selectionStages = asArray(selection?.stages)
-  const selectionCandidates = asArray(selection?.candidates)
   const selectionPricing = selection?.pricing || {}
   const selectionStageItems = selection?.stage_items && typeof selection.stage_items === 'object' ? selection.stage_items : {}
-  const scanMode = selection?.mode || 'DAILY'
-  const scanModeReason = selection?.mode_reason
-  const activeStageItems = asArray(selectionStageItems[activeStage])
+
+  const expectedReturn = Number(selectionPricing.sell_rules?.take_profit_ret)
+  const expectedReturnPct = Number.isFinite(expectedReturn) ? expectedReturn * 100 : null
 
   const handleKisToggle = async (row) => {
     const password = window.prompt('KIS 계좌 토글 비밀번호를 입력하세요')
@@ -261,7 +217,48 @@ function App() {
     return stage.value ?? '-'
   }
 
-  const lastDate = status?.daily_price?.date?.max
+  const stageOrder = ['universe', 'min_amount', 'liquidity', 'disparity', 'final']
+  const stageTagMap = {
+    min_amount: 'Filter 1',
+    liquidity: 'Filter 2',
+    disparity: 'Filter 3',
+    final: 'Final'
+  }
+
+  const stageMap = useMemo(() => {
+    const map = {}
+    selectionStages.forEach((stage) => {
+      if (stage?.key) map[stage.key] = stage
+    })
+    return map
+  }, [selectionStages])
+
+  const universeCount = stageMap.universe?.count || 0
+  const stageNodes = stageOrder.map((key, idx) => {
+    const stage = stageMap[key] || { key, label: key, count: 0, value: null }
+    const prevKey = idx > 0 ? stageOrder[idx - 1] : null
+    const prevCount = prevKey ? (stageMap[prevKey]?.count || 0) : stage.count || 0
+    const count = stage.count || 0
+    const drop = idx === 0 ? 0 : Math.max(prevCount - count, 0)
+    const passRate = idx === 0 ? 1 : (prevCount ? count / prevCount : 0)
+    const ratio = universeCount ? count / universeCount : 0
+    const items = key === 'universe' ? [] : asArray(selectionStageItems[key])
+    return {
+      key,
+      label: stage.label || key,
+      criteria: formatStageValue(stage),
+      count,
+      drop,
+      passRate,
+      ratio,
+      tag: stageTagMap[key] || '',
+      items,
+    }
+  })
+
+  const stageColumns = stageNodes.filter((node) => ['min_amount', 'liquidity', 'disparity'].includes(node.key))
+  const finalStage = stageNodes.find((node) => node.key === 'final')
+
   const refreshLabel = lastUpdated
     ? `${lastUpdated.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`
     : '-'
@@ -271,80 +268,59 @@ function App() {
     return [...chartData].reverse().slice(0, 30)
   }, [chartData])
 
+  const expectedSellPrice = (price) => {
+    const p = Number(price)
+    if (!Number.isFinite(p) || !Number.isFinite(expectedReturn)) return null
+    return p * (1 + expectedReturn)
+  }
+
   return (
     <div className="app-shell">
-      <div className="orb orb-1" />
-      <div className="orb orb-2" />
-      <div className="orb orb-3" />
-
-      <header className="hero">
-        <div className="hero-main">
-          <div className="hero-badge">LIVE MARKET CONSOLE</div>
-          <h1>BNF-K Trading Observatory</h1>
-          <p className="hero-sub">
-            종목·차트·데이터 파이프라인을 한 화면에서 추적하는 실시간 관제 대시보드
-          </p>
-          <div className="hero-controls">
-            <div className="segmented">
-              <button className={filter === 'KOSPI100' ? 'active' : ''} onClick={() => setFilter('KOSPI100')}>KOSPI 100</button>
-              <button className={filter === 'KOSDAQ150' ? 'active' : ''} onClick={() => setFilter('KOSDAQ150')}>KOSDAQ 150</button>
-            </div>
-            <div className="control">
-              <label>Sector</label>
-              <select value={sectorFilter} onChange={e => setSectorFilter(e.target.value)}>
-                <option value="ALL">전체 섹터</option>
-                {sectorOptions.map((s, i) => (
-                  <option key={`${s.market}-${s.sector_name}-${i}`} value={s.sector_name}>
-                    {s.sector_name} ({s.count})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="control">
-              <label>Days</label>
-              <input type="number" value={days} onChange={e => setDays(Number(e.target.value) || 60)} min={10} max={400} />
-            </div>
-            <button className="primary-btn" onClick={() => loadData()}>Refresh</button>
-          </div>
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-kicker">REAL TRADE ONLY</span>
+          <h1 className="brand-title">BNF-K Trade Studio</h1>
+          <p className="brand-sub">필터링부터 매수·매도까지 필요한 데이터만 집중 노출합니다.</p>
         </div>
-        <div className="hero-metrics">
-          <div className="metric-card">
-            <span className="metric-label">Universe</span>
-            <strong>{status?.universe?.total || 0} 종목</strong>
-            <span className="metric-sub">{filter}</span>
+        <div className="controls">
+          <div className="segmented">
+            <button className={filter === 'KOSPI100' ? 'active' : ''} onClick={() => setFilter('KOSPI100')}>KOSPI 100</button>
+            <button className={filter === 'KOSDAQ150' ? 'active' : ''} onClick={() => setFilter('KOSDAQ150')}>KOSDAQ 150</button>
           </div>
-          <div className="metric-card">
-            <span className="metric-label">Daily Data</span>
-            <strong>{status?.daily_price?.codes || 0} / 250</strong>
-            <span className="metric-sub">결측 {status?.daily_price?.missing_codes || 0}</span>
+          <div className="control">
+            <label>Sector</label>
+            <select value={sectorFilter} onChange={e => setSectorFilter(e.target.value)}>
+              <option value="ALL">전체 섹터</option>
+              {sectorOptions.map((s, i) => (
+                <option key={`${s.market}-${s.sector_name}-${i}`} value={s.sector_name}>
+                  {s.sector_name} ({s.count})
+                </option>
+              ))}
+            </select>
           </div>
-          <div className="metric-card">
-            <span className="metric-label">Last Update</span>
-            <strong>{lastDate || '-'}</strong>
-            <span className="metric-sub">refresh {refreshLabel}</span>
+          <div className="control">
+            <label>Days</label>
+            <input type="number" value={days} onChange={e => setDays(Number(e.target.value) || 60)} min={10} max={400} />
           </div>
-          <div className="metric-card">
-            <span className="metric-label">Signals</span>
-            <strong>{signals.length}</strong>
-            <span className="metric-sub">최근 30건</span>
-          </div>
+          <button className="primary-btn" onClick={() => loadData()}>Refresh</button>
+          <div className="refresh-meta">최근 업데이트 {refreshLabel}</div>
         </div>
       </header>
 
-      <main className="main-grid">
-        <section className="panel universe-panel">
-          <div className="panel-header">
+      <main className="dashboard-grid">
+        <aside className="panel stock-panel">
+          <div className="panel-head">
             <div>
-              <h2>Universe</h2>
+              <h2>주식목록</h2>
               <p>{filtered.length} 종목</p>
             </div>
-            <div className="search">
-              <input
-                placeholder="코드/종목명/섹터 검색"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-              />
-            </div>
+          </div>
+          <div className="search">
+            <input
+              placeholder="코드/종목명/섹터 검색"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
           </div>
           <div className="list">
             {filtered.map((row) => (
@@ -366,231 +342,130 @@ function App() {
               </button>
             ))}
           </div>
-        </section>
+        </aside>
 
-        <section className="panel focus-panel">
-          <div className="panel-header">
-            <div>
-              <h2>Scan & Trade</h2>
-              <p>{scanMode} Mode {scanModeReason ? `· ${scanModeReason}` : ''}</p>
+        <section className="content-column">
+          <div className="panel section">
+            <div className="section-head">
+              <div>
+                <h2>주식 종목 선별 과정</h2>
+                <p>필터 1 ~ 3 통과 종목을 단계별로 확인합니다.</p>
+              </div>
+              <span className="section-meta">기준일 {selection?.date || '-'}</span>
             </div>
-            <div className="panel-tabs">
-              <button className={focusTab === 'scan' ? 'active' : ''} onClick={() => setFocusTab('scan')}>Scan</button>
-              <button className={focusTab === 'instrument' ? 'active' : ''} onClick={() => setFocusTab('instrument')}>Instrument</button>
+            <div className="flow-grid">
+              {stageNodes.map((stage) => (
+                <div key={stage.key} className="flow-card">
+                  <div className="flow-header">
+                    <span>{stage.label}</span>
+                    <strong>{stage.count}</strong>
+                  </div>
+                  <div className="flow-meta">
+                    <span>{stage.criteria}</span>
+                    {stage.key !== 'universe' ? (
+                      <em>통과 {(stage.passRate * 100).toFixed(1)}% · 탈락 {stage.drop}</em>
+                    ) : (
+                      <em>기준 유니버스</em>
+                    )}
+                  </div>
+                  <div className="flow-bar">
+                    <span style={{ width: `${Math.max(6, stage.ratio * 100)}%` }} />
+                  </div>
+                </div>
+              ))}
             </div>
+
+            <div className="filter-columns">
+              {stageColumns.map((stage) => (
+                <div key={stage.key} className="filter-column">
+                  <div className="filter-head">
+                    <div>
+                      <div className="filter-tag">{stage.tag}</div>
+                      <div className="filter-title">{stage.label}</div>
+                      <div className="filter-criteria">{stage.criteria}</div>
+                    </div>
+                    <div className="filter-count">{stage.count}</div>
+                  </div>
+                  <div className="filter-sub">
+                    통과 {(stage.passRate * 100).toFixed(1)}% · 탈락 {stage.drop}
+                  </div>
+                  <div className="filter-list">
+                    {stage.items.map((row, idx) => (
+                      <div key={`${stage.key}-${row.code}-${idx}`} className="filter-row">
+                        <div>
+                          <div className="mono">{row.code}</div>
+                          <div className="filter-name">{row.name || '-'}</div>
+                        </div>
+                        <div className="filter-meta">
+                          <span>{formatCurrency(row.amount)}</span>
+                          <span className={(row.disparity ?? 0) <= 0 ? 'down' : 'up'}>
+                            {formatPct((row.disparity || 0) * 100)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                    {stage.items.length === 0 && <div className="empty">통과 종목이 없습니다.</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {finalStage ? (
+              <div className="final-board">
+                <div className="final-head">
+                  <div>
+                    <div className="filter-tag">Final</div>
+                    <div className="final-title">{finalStage.label}</div>
+                    <div className="filter-criteria">{finalStage.criteria}</div>
+                  </div>
+                  <div className="filter-count">{finalStage.count}</div>
+                </div>
+                <div className="final-list">
+                  {finalStage.items.map((row, idx) => (
+                    <div key={`final-${row.code}-${idx}`} className="final-row">
+                      <div>
+                        <div className="mono">{row.code}</div>
+                        <div className="filter-name">{row.name || '-'}</div>
+                      </div>
+                      <div className="filter-meta">
+                        <span>{formatCurrency(row.amount)}</span>
+                        <span className={(row.disparity ?? 0) <= 0 ? 'down' : 'up'}>
+                          {formatPct((row.disparity || 0) * 100)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                  {finalStage.items.length === 0 && <div className="empty">최종 후보가 없습니다.</div>}
+                </div>
+              </div>
+            ) : null}
           </div>
 
-          {focusTab === 'scan' ? (
-            <div className="scan-board">
-              <div className="panel-badges">
-                <span className={`status-pill ${engines?.monitor?.running ? 'on' : 'off'}`}>
-                  MONITOR {engines?.monitor?.running ? 'ON' : 'OFF'}
-                </span>
-                <span className={`status-pill ${engines?.accuracy_loader?.running ? 'on' : 'off'}`}>
-                  ACC {engines?.accuracy_loader?.running ? 'ON' : 'OFF'}
-                </span>
-                <span className="status-pill">{selection?.date || '-'}</span>
+          <div className="panel section">
+            <div className="section-head">
+              <div>
+                <h2>차트 & 표테이블</h2>
+                <p>선택 종목의 가격 흐름과 표 데이터를 제공합니다.</p>
               </div>
-
-              <div className="plan-grid">
-                <div className="plan-column">
-                  <div className="plan-head">Buy Candidates</div>
-                  <div className="plan-list">
-                    {planBuys.slice(0, 8).map((row) => (
-                      <div key={row.id} className="plan-row">
-                        <div>
-                          <div className="mono">{row.code}</div>
-                          <div className="plan-name">{row.name || '-'}</div>
-                        </div>
-                        <div className="plan-meta">
-                          <span className="plan-price">{formatCurrency(row.planned_price)}</span>
-                          <span className="plan-qty">x{formatNumber(row.qty)}</span>
-                          <span className={`plan-status ${row.status?.toLowerCase()}`}>{row.status}</span>
-                        </div>
-                      </div>
-                    ))}
-                    {planBuys.length === 0 && <div className="empty">매수 예정 종목이 없습니다.</div>}
-                  </div>
-                </div>
-                <div className="plan-column">
-                  <div className="plan-head">Sell Candidates</div>
-                  <div className="plan-list">
-                    {planSells.slice(0, 8).map((row) => (
-                      <div key={row.id} className="plan-row">
-                        <div>
-                          <div className="mono">{row.code}</div>
-                          <div className="plan-name">{row.name || '-'}</div>
-                        </div>
-                        <div className="plan-meta">
-                          <span className="plan-price">{formatCurrency(row.planned_price)}</span>
-                          <span className="plan-qty">x{formatNumber(row.qty)}</span>
-                          <span className={`plan-status ${row.status?.toLowerCase()}`}>{row.status}</span>
-                        </div>
-                      </div>
-                    ))}
-                    {planSells.length === 0 && <div className="empty">매도 예정 종목이 없습니다.</div>}
-                  </div>
-                </div>
-              </div>
-
-              <div className="pipeline-flow">
-                {selectionStages.map((stage, idx) => {
-                  const isActive = activeStage === stage.key
-                  return (
-                    <button
-                      key={stage.key}
-                      className={`pipeline-step ${isActive ? 'active' : ''}`}
-                      onClick={() => setActiveStage(stage.key)}
-                      type="button"
-                    >
-                      <div className="pipeline-label">{stage.label}</div>
-                      <div className="pipeline-count">{stage.count}</div>
-                      <div className="pipeline-value">{formatStageValue(stage)}</div>
-                      <div className="pipeline-bar">
-                        <span style={{ width: selectionStages[0]?.count ? `${(stage.count / selectionStages[0].count) * 100}%` : '0%' }} />
-                      </div>
-                      {idx < selectionStages.length - 1 && <div className="pipeline-arrow">→</div>}
-                    </button>
-                  )
-                })}
-                {selectionStages.length === 0 && <div className="empty">선정 파이프라인 데이터를 불러오지 못했습니다.</div>}
-              </div>
-
-              <div className="pricing-box">
-                <div className="pricing-title">Price Decision Logic</div>
-                <div className="pricing-grid">
-                  <div>
-                    <span>Price Source</span>
-                    <strong>{selectionPricing.price_source || 'close'}</strong>
-                  </div>
-                  <div>
-                    <span>Order Value</span>
-                    <strong>{formatCurrency(selectionPricing.order_value)}</strong>
-                  </div>
-                  <div>
-                    <span>Budget / Pos</span>
-                    <strong>{formatCurrency(selectionPricing.budget_per_pos)}</strong>
-                  </div>
-                  <div>
-                    <span>Qty Formula</span>
-                    <strong>{selectionPricing.qty_formula || 'order_value / close'}</strong>
-                  </div>
-                  <div>
-                    <span>Order Type</span>
-                    <strong>{selectionPricing.ord_dvsn || '-'}</strong>
-                  </div>
-                  <div>
-                    <span>Rank Mode</span>
-                    <strong>{(selectionPricing.rank_mode || 'amount').toUpperCase()}</strong>
-                  </div>
-                  <div>
-                    <span>Sector Cap</span>
-                    <strong>{selectionPricing.max_per_sector || 0}</strong>
-                  </div>
-                  <div>
-                    <span>Trend Filter</span>
-                    <strong>{selection?.summary?.trend_filter ? 'ON' : 'OFF'}</strong>
-                  </div>
-                  <div>
-                    <span>Sell Take Profit</span>
-                    <strong>{formatPct((selectionPricing.sell_rules?.take_profit_disparity || 0) * 100)}</strong>
-                  </div>
-                  <div>
-                    <span>Sell Stop Loss</span>
-                    <strong>{formatPct((selectionPricing.sell_rules?.stop_loss || 0) * 100)}</strong>
-                  </div>
-                  <div>
-                    <span>Max Holding</span>
-                    <strong>{selectionPricing.sell_rules?.max_holding_days || '-'} days</strong>
-                  </div>
-                </div>
-              </div>
-
-              <div className="candidate-table">
-                <div className="candidate-row head">
-                  <span>Rank</span>
-                  <span>Code</span>
-                  <span>Name</span>
-                  <span>Amount</span>
-                  <span>Disparity</span>
-                  <span>Close</span>
-                </div>
-                {selectionCandidates.slice(0, 12).map((row) => (
-                  <div key={row.code} className="candidate-row">
-                    <span>{row.rank}</span>
-                    <span className="mono">{row.code}</span>
-                    <span>{row.name}</span>
-                    <span>{formatCurrency(row.amount)}</span>
-                    <span className={row.disparity <= 0 ? 'down' : 'up'}>{formatPct((row.disparity || 0) * 100)}</span>
-                    <span>{formatCurrency(row.close)}</span>
-                  </div>
-                ))}
-                {selectionCandidates.length === 0 && <div className="empty">현재 선정된 후보가 없습니다.</div>}
-              </div>
-
-              <div className="stage-table">
-                <div className="stage-title">
-                  Stage Detail: {selectionStages.find(s => s.key === activeStage)?.label || 'N/A'}
-                </div>
-                <div className="stage-row head">
-                  <span>Code</span>
-                  <span>Name</span>
-                  <span>Amount</span>
-                  <span>Disparity</span>
-                  <span>Close</span>
-                </div>
-                {activeStageItems.slice(0, 12).map((row) => (
-                  <div key={`${activeStage}-${row.code}`} className="stage-row">
-                    <span className="mono">{row.code}</span>
-                    <span>{row.name}</span>
-                    <span>{formatCurrency(row.amount)}</span>
-                    <span className={row.disparity <= 0 ? 'down' : 'up'}>{formatPct((row.disparity || 0) * 100)}</span>
-                    <span>{formatCurrency(row.close)}</span>
-                  </div>
-                ))}
-                {activeStageItems.length === 0 && (
-                  <div className="empty">해당 단계에 표시할 종목이 없습니다.</div>
-                )}
-              </div>
+              <span className="section-meta">
+                {selected ? `${selected.code} ${selected.name}` : '종목을 선택하세요'}
+              </span>
             </div>
-          ) : selected ? (
-            <div className="instrument">
-              <div className="instrument-head">
-                <div>
-                  <div className="instrument-code">{selected.code}</div>
-                  <div className="instrument-name">{selected.name}</div>
-                  <div className="instrument-meta">{selected.market} · {selected.sector_name || 'UNKNOWN'}</div>
-                </div>
-                <div className={`delta ${delta >= 0 ? 'up' : 'down'}`}>
-                  <div className="delta-value">{formatCurrency(latest?.close)}</div>
-                  <div className="delta-sub">{formatPct(deltaPct)}</div>
-                </div>
-              </div>
 
-              <div className="stats-grid">
-                <div className="stat-tile">
-                  <span>Close</span>
-                  <strong>{formatCurrency(latest?.close)}</strong>
-                  <em>MA25 {formatCurrency(latest?.ma25)}</em>
+            {selected ? (
+              <div className="chart-grid">
+                <div className="chart-summary">
+                  <div>
+                    <div className="ticker">{selected.code}</div>
+                    <div className="name">{selected.name}</div>
+                    <div className="meta">{selected.market} · {selected.sector_name || 'UNKNOWN'}</div>
+                  </div>
+                  <div className={`delta ${delta >= 0 ? 'up' : 'down'}`}>
+                    <div className="delta-value">{formatCurrency(latest?.close)}</div>
+                    <div className="delta-sub">{formatPct(deltaPct)}</div>
+                  </div>
                 </div>
-                <div className="stat-tile">
-                  <span>Volume</span>
-                  <strong>{formatNumber(latest?.volume)}</strong>
-                  <em>Amount {formatCurrency(latest?.amount)}</em>
-                </div>
-                <div className="stat-tile">
-                  <span>Disparity</span>
-                  <strong>{formatPct((latest?.disparity || 0) * 100)}</strong>
-                  <em>vs MA25</em>
-                </div>
-                <div className="stat-tile">
-                  <span>Range</span>
-                  <strong>{formatCurrency(latest?.high)} / {formatCurrency(latest?.low)}</strong>
-                  <em>Open {formatCurrency(latest?.open)}</em>
-                </div>
-              </div>
 
-              <div className="chart-stack">
                 <div className="chart-card">
                   <div className="chart-title">Price · MA25 · Volume</div>
                   {pricesLoading ? (
@@ -604,15 +479,16 @@ function App() {
                         <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} interval={Math.max(0, Math.floor(chartData.length / 6))} />
                         <YAxis yAxisId="price" tick={{ fontSize: 11, fill: '#94a3b8' }} domain={['auto', 'auto']} />
                         <YAxis yAxisId="volume" orientation="right" tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                        <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid rgba(148,163,184,0.3)' }} labelStyle={{ color: '#e2e8f0' }} />
+                        <Tooltip contentStyle={{ background: '#101827', border: '1px solid rgba(148,163,184,0.3)' }} labelStyle={{ color: '#e2e8f0' }} />
                         <Legend wrapperStyle={{ color: '#cbd5f5' }} />
-                        <Area yAxisId="price" dataKey="close" stroke="#7dd3fc" fill="rgba(14,116,144,0.35)" name="Close" />
-                        <Line yAxisId="price" type="monotone" dataKey="ma25" stroke="#facc15" dot={false} strokeWidth={2} name="MA25" />
-                        <Bar yAxisId="volume" dataKey="volume" fill="rgba(251,191,36,0.35)" name="Volume" />
+                        <Area yAxisId="price" dataKey="close" stroke="#38bdf8" fill="rgba(14,116,144,0.35)" name="Close" />
+                        <Line yAxisId="price" type="monotone" dataKey="ma25" stroke="#f97316" dot={false} strokeWidth={2} name="MA25" />
+                        <Bar yAxisId="volume" dataKey="volume" fill="rgba(250,204,21,0.35)" name="Volume" />
                       </ComposedChart>
                     </ResponsiveContainer>
                   )}
                 </div>
+
                 <div className="chart-card">
                   <div className="chart-title">Disparity Flow</div>
                   {chartData.length === 0 ? (
@@ -623,17 +499,14 @@ function App() {
                         <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.08)" />
                         <XAxis dataKey="date" hide />
                         <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                        <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid rgba(148,163,184,0.3)' }} labelStyle={{ color: '#e2e8f0' }} />
+                        <Tooltip contentStyle={{ background: '#101827', border: '1px solid rgba(148,163,184,0.3)' }} labelStyle={{ color: '#e2e8f0' }} />
                         <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="4 4" />
-                        <Area dataKey="disparity" stroke="#fb7185" fill="rgba(248,113,113,0.35)" />
+                        <Area dataKey="disparity" stroke="#f43f5e" fill="rgba(248,113,113,0.3)" />
                       </AreaChart>
                     </ResponsiveContainer>
                   )}
                 </div>
-              </div>
 
-              <div className="panel soft">
-                <div className="panel-title">Daily Prices</div>
                 <div className="price-table">
                   <div className="price-row head">
                     <span>Date</span>
@@ -660,273 +533,139 @@ function App() {
                   {tableRows.length === 0 && <div className="empty">가격 데이터가 없습니다.</div>}
                 </div>
               </div>
-
-            </div>
-          ) : (
-            <div className="placeholder">왼쪽에서 종목을 선택하세요.</div>
-          )}
-
-          <div className="split-grid">
-            <div className="panel subtle">
-              <div className="panel-title">Recent Orders</div>
-              <div className="mini-table">
-                {orders.slice(0, 6).map((o, i) => (
-                  <div key={i} className="mini-row">
-                    <span className="mono">{o.code}</span>
-                    <span className={`side ${o.side === 'BUY' ? 'buy' : 'sell'}`}>{o.side}</span>
-                    <span>{formatNumber(o.qty)}</span>
-                    <span>{o.status}</span>
-                  </div>
-                ))}
-                {orders.length === 0 && <div className="empty">주문 내역이 없습니다.</div>}
-              </div>
-            </div>
-            <div className="panel subtle">
-              <div className="panel-title">Positions</div>
-              <div className="mini-table">
-                {positions.slice(0, 6).map((p, i) => (
-                  <div key={i} className="mini-row">
-                    <span className="mono">{p.code}</span>
-                    <span>{p.qty}</span>
-                    <span>{formatCurrency(p.avg_price)}</span>
-                    <span>{formatTime(p.updated_at)}</span>
-                  </div>
-                ))}
-                {positions.length === 0 && <div className="empty">보유 포지션이 없습니다.</div>}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="panel side-panel">
-          <div className="panel-header">
-            <div>
-              <h2>Telemetry</h2>
-              <p>엔진 · 데이터 · 시그널</p>
-            </div>
-          </div>
-
-          <div className="engine-grid">
-            <div className={`engine-card ${engines?.monitor?.running ? 'on' : 'off'}`}>
-              <span>Monitoring</span>
-              <strong>{engines?.monitor?.running ? 'RUNNING' : 'STOP'}</strong>
-            </div>
-            <div className="engine-card on">
-              <span>Trader</span>
-              <strong>P:{engines?.trader?.pending || 0} S:{engines?.trader?.sent || 0}</strong>
-            </div>
-            <div className={`engine-card ${engines?.accuracy_loader?.running ? 'on' : 'off'}`}>
-              <span>Accuracy</span>
-              <strong>{engines?.accuracy_loader?.running ? 'RUNNING' : 'STOP'}</strong>
-            </div>
-          </div>
-
-          <div className="panel soft">
-            <div className="panel-title">Engine Snapshot</div>
-            <div className="engine-snapshot">
-              <div>
-                <span>Selection Signals</span>
-                <strong>{plans?.counts?.buys || 0} BUY / {plans?.counts?.sells || 0} SELL</strong>
-                <em>exec {plans?.exec_date || '-'}</em>
-              </div>
-              <div>
-                <span>Trader Queue</span>
-                <strong>P:{engines?.trader?.pending || 0} S:{engines?.trader?.sent || 0}</strong>
-                <em>last {engines?.trader?.last_signal || '-'}</em>
-              </div>
-              <div>
-                <span>Connected</span>
-                <strong>{account?.connected ? 'YES' : 'NO'}</strong>
-                <em>{account?.connected_at ? new Date(account.connected_at).toLocaleString('ko-KR') : '-'}</em>
-              </div>
-            </div>
-          </div>
-
-          <div className="panel soft">
-            <div className="panel-title">Data Health</div>
-            <div className="health-grid">
-              <div>
-                <span>일봉 커버리지</span>
-                <strong>{status?.daily_price?.codes || 0} / 250</strong>
-              </div>
-              <div>
-                <span>결측</span>
-                <strong>{status?.daily_price?.missing_codes || 0}</strong>
-              </div>
-            </div>
-            <div className="accuracy-list">
-              {accuracyRows.map((row) => (
-                <div key={row.label} className="accuracy-row">
-                  <div className="label">{row.label}</div>
-                  <div className="bar">
-                    <span style={{ width: `${Math.min(100, (row.value / 250) * 100)}%` }} />
-                  </div>
-                  <div className="value">{row.value}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="panel soft">
-            <div className="panel-title">Signal Feed</div>
-            <div className="signal-list">
-              {signals.slice(0, 8).map((s, i) => (
-                <div key={i} className="signal-row">
-                  <span className={`signal-side ${s.side === 'BUY' ? 'buy' : 'sell'}`}>{s.side}</span>
-                  <span className="mono">{s.code}</span>
-                  <span>{formatNumber(s.qty)}</span>
-                  <span>{s.signal_date}</span>
-                </div>
-              ))}
-              {signals.length === 0 && <div className="empty">최근 시그널이 없습니다.</div>}
-            </div>
-          </div>
-
-          <div className="panel soft">
-            <div className="panel-title">Strategy</div>
-            {strategy ? (
-              <div className="strategy-grid">
-                <div><span>Liquidity Rank</span><strong>{strategy.liquidity_rank}</strong></div>
-                <div><span>Min Amount</span><strong>{formatCurrency(strategy.min_amount)}</strong></div>
-                <div><span>Rank Mode</span><strong>{(strategy.rank_mode || 'amount').toUpperCase()}</strong></div>
-                <div><span>Max Positions</span><strong>{strategy.max_positions}</strong></div>
-                <div><span>Sector Cap</span><strong>{strategy.max_per_sector}</strong></div>
-                <div><span>Trend MA25</span><strong>{strategy.trend_ma25_rising ? 'ON' : 'OFF'}</strong></div>
-                <div><span>Disparity KOSPI</span><strong>{strategy.disparity_buy_kospi}</strong></div>
-                <div><span>Disparity KOSDAQ</span><strong>{strategy.disparity_buy_kosdaq}</strong></div>
-                <div><span>Disparity Sell</span><strong>{strategy.disparity_sell}</strong></div>
-                <div><span>Stop Loss</span><strong>{strategy.stop_loss}</strong></div>
-                <div><span>Initial Cash</span><strong>{formatCurrency(strategy.initial_cash)}</strong></div>
-                <div><span>Capital Util</span><strong>{formatPct((strategy.capital_utilization || 0) * 100)}</strong></div>
-                <div><span>Order Value</span><strong>{formatCurrency(strategy.order_value)}</strong></div>
-                <div><span>Max Holding</span><strong>{strategy.max_holding_days}</strong></div>
-              </div>
             ) : (
-              <div className="empty">전략 정보를 불러오지 못했습니다.</div>
+              <div className="placeholder">왼쪽에서 종목을 선택하세요.</div>
             )}
           </div>
 
-          <div className="panel soft">
-            <div className="panel-title">KIS Accounts</div>
-            {kisError ? <div className="error-banner">{kisError}</div> : null}
-            <div className="kis-list">
-              {kisKeys.map((row) => (
-                <div key={row.id} className={`kis-row ${row.enabled ? 'on' : 'off'}`}>
-                  <div className="kis-main">
-                    <div className="kis-label">{row.label || `KIS${row.id}`}</div>
-                    <div className="kis-desc">{row.description || '설명 없음'}</div>
+          <div className="panel section">
+            <div className="section-head">
+              <div>
+                <h2>자동매매 매수 예상</h2>
+                <p>계획된 매수 가격과 기대 수익률 기준을 표시합니다.</p>
+              </div>
+              <span className="section-meta">기대 수익률 {expectedReturnPct === null ? '-' : `${expectedReturnPct.toFixed(2)}%`}</span>
+            </div>
+            <div className="plan-list">
+              {planBuys.slice(0, 12).map((row) => (
+                <div key={row.id} className="plan-row">
+                  <div>
+                    <div className="mono">{row.code}</div>
+                    <div className="plan-name">{row.name || '-'}</div>
                   </div>
-                  <div className="kis-meta">
-                    <span>{row.account_code ? `코드 ${row.account_code}` : '-'}</span>
-                    <span>{row.account_no_masked || '-'}</span>
+                  <div className="plan-meta">
+                    <span className="plan-price">{formatCurrency(row.planned_price)}</span>
+                    <span className="plan-qty">x{formatNumber(row.qty)}</span>
+                    <span className="plan-qty">예상 매도가 {formatCurrency(expectedSellPrice(row.planned_price))}</span>
                   </div>
-                  <button
-                    className={`kis-toggle ${row.enabled ? 'on' : 'off'}`}
-                    onClick={() => handleKisToggle(row)}
-                  >
-                    {row.enabled ? 'ON' : 'OFF'}
-                  </button>
                 </div>
               ))}
-              {kisKeys.length === 0 && <div className="empty">등록된 계좌가 없습니다.</div>}
+              {planBuys.length === 0 && <div className="empty">매수 예정 종목이 없습니다.</div>}
             </div>
           </div>
 
-          <div className="panel soft">
-            <div className="panel-title">Recent Jobs</div>
-            <div className="job-list">
-              {jobs.slice(0, 6).map((j, i) => (
-                <div key={i} className="job-row">
-                  <div>
-                    <strong>{j.job_name}</strong>
-                    <span>{formatTime(j.started_at)}</span>
-                  </div>
-                  <span className={`job-status ${j.status === 'SUCCESS' ? 'ok' : 'err'}`}>{j.status}</span>
+          <div className="panel section">
+            <div className="section-head">
+              <div>
+                <h2>자동매매 결과</h2>
+                <p>보유 포지션 기준으로 매수가격, 현재 매도가격, 수익률을 표시합니다.</p>
+              </div>
+              <span className="section-meta">총 {portfolioPositions.length}건</span>
+            </div>
+            <div className="result-table">
+              <div className="result-row head">
+                <span>Code</span>
+                <span>Name</span>
+                <span>매수가</span>
+                <span>매도가격(현재)</span>
+                <span>수익률</span>
+                <span>Updated</span>
+              </div>
+              {portfolioPositions.slice(0, 14).map((row) => (
+                <div key={row.code} className="result-row">
+                  <span className="mono">{row.code}</span>
+                  <span>{row.name}</span>
+                  <span>{formatCurrency(row.avg_price)}</span>
+                  <span>{formatCurrency(row.last_close)}</span>
+                  <span className={row.pnl_pct >= 0 ? 'up' : 'down'}>{formatPct(row.pnl_pct)}</span>
+                  <span>{formatTime(row.updated_at)}</span>
                 </div>
               ))}
-              {jobs.length === 0 && <div className="empty">작업 로그가 없습니다.</div>}
+              {portfolioPositions.length === 0 && <div className="empty">자동매매 결과가 없습니다.</div>}
+            </div>
+            <div className="result-total">
+              <span>평가손익</span>
+              <strong className={portfolioTotals.pnl >= 0 ? 'up' : 'down'}>
+                {formatCurrency(portfolioTotals.pnl)} ({formatPct(portfolioTotals.pnl_pct)})
+              </strong>
             </div>
           </div>
         </section>
-      </main>
 
-      <section className="wide-grid">
-        <div className="panel soft">
-          <div className="panel-title">Account Overview</div>
+        <aside className="panel account-panel">
+          <div className="section-head">
+            <div>
+              <h2>계좌 온오프</h2>
+              <p>KIS 계좌를 실전 모드로 제어합니다.</p>
+            </div>
+            <span className="section-meta">{account?.connected ? '연결됨' : '미연결'}</span>
+          </div>
+          {kisError ? <div className="error-banner">{kisError}</div> : null}
+          <div className="kis-list">
+            {kisKeys.map((row) => (
+              <div key={row.id} className={`kis-row ${row.enabled ? 'on' : 'off'}`}>
+                <div className="kis-main">
+                  <div className="kis-label">{row.account || row.id}</div>
+                  <div className="kis-desc">{row.description || row.user || '실전 계좌'}</div>
+                </div>
+                <div className="kis-meta">
+                  <span>{row.env || 'real'}</span>
+                  <span>{row.updated_at ? formatTime(row.updated_at) : '-'}</span>
+                </div>
+                <button className={`kis-toggle ${row.enabled ? 'on' : 'off'}`} onClick={() => handleKisToggle(row)}>
+                  {row.enabled ? 'ON' : 'OFF'}
+                </button>
+              </div>
+            ))}
+            {kisKeys.length === 0 && <div className="empty">등록된 계좌가 없습니다.</div>}
+          </div>
+
+          <div className="divider" />
+
+          <div className="section-head">
+            <div>
+              <h2>잔고 · 수익률</h2>
+              <p>현재 잔고와 누적 수익률을 확인합니다.</p>
+            </div>
+            <span className="section-meta">{account?.connected_at ? new Date(account.connected_at).toLocaleDateString('ko-KR') : '-'}</span>
+          </div>
           {account?.connected ? (
-            <>
-              <div className="account-grid">
-                <div>
-                  <span>Total Assets</span>
-                  <strong>{formatCurrency(accountSummary.total_assets)}</strong>
-                </div>
-                <div>
-                  <span>Cash</span>
-                  <strong>{formatCurrency(accountSummary.cash)}</strong>
-                </div>
-                <div>
-                  <span>Positions Value</span>
-                  <strong>{formatCurrency(accountSummary.positions_value)}</strong>
-                </div>
-                <div>
-                  <span>Total PnL</span>
-                  <strong className={accountSummary.total_pnl >= 0 ? 'up' : 'down'}>
-                    {formatCurrency(accountSummary.total_pnl)}
-                  </strong>
-                  <em>{formatPct(accountSummary.total_pnl_pct)}</em>
-                </div>
-                <div>
-                  <span>Since Connected</span>
-                  <strong className={sinceConnected.pnl >= 0 ? 'up' : 'down'}>
-                    {formatCurrency(sinceConnected.pnl)}
-                  </strong>
-                  <em>{formatPct(sinceConnected.pnl_pct)}</em>
-                </div>
+            <div className="account-metrics">
+              <div className="metric-card">
+                <span>총자산</span>
+                <strong>{formatCurrency(accountSummary.total_assets)}</strong>
               </div>
-              <div className="account-sub">
-                연결 시점: {account?.connected_at ? new Date(account.connected_at).toLocaleString('ko-KR') : '-'}
+              <div className="metric-card">
+                <span>현금</span>
+                <strong>{formatCurrency(accountSummary.cash)}</strong>
               </div>
-            </>
+              <div className="metric-card">
+                <span>보유자산</span>
+                <strong>{formatCurrency(accountSummary.positions_value)}</strong>
+              </div>
+              <div className="metric-card">
+                <span>수익률</span>
+                <strong className={accountSummary.total_pnl >= 0 ? 'up' : 'down'}>
+                  {formatCurrency(accountSummary.total_pnl)}
+                </strong>
+                <em>{formatPct(accountSummary.total_pnl_pct)}</em>
+              </div>
+            </div>
           ) : (
             <div className="empty">자동매매 계좌 연결 정보를 불러오지 못했습니다.</div>
           )}
-        </div>
-
-        <div className="panel soft">
-          <div className="panel-title">Portfolio</div>
-          <div className="portfolio-table">
-            <div className="portfolio-row head">
-              <span>Code</span>
-              <span>Name</span>
-              <span>Qty</span>
-              <span>Avg</span>
-              <span>Last</span>
-              <span>PnL</span>
-              <span>PnL%</span>
-            </div>
-            {portfolioPositions.slice(0, 20).map((row) => (
-              <div key={row.code} className="portfolio-row">
-                <span className="mono">{row.code}</span>
-                <span>{row.name}</span>
-                <span>{formatNumber(row.qty)}</span>
-                <span>{formatCurrency(row.avg_price)}</span>
-                <span>{formatCurrency(row.last_close)}</span>
-                <span className={row.pnl >= 0 ? 'up' : 'down'}>{formatCurrency(row.pnl)}</span>
-                <span className={row.pnl_pct >= 0 ? 'up' : 'down'}>{formatPct(row.pnl_pct)}</span>
-              </div>
-            ))}
-            {portfolioPositions.length === 0 && <div className="empty">보유 종목이 없습니다.</div>}
-          </div>
-          <div className="portfolio-total">
-            <span>Total</span>
-            <strong>{formatCurrency(portfolioTotals.positions_value)}</strong>
-            <span className={portfolioTotals.pnl >= 0 ? 'up' : 'down'}>
-              {formatCurrency(portfolioTotals.pnl)} ({formatPct(portfolioTotals.pnl_pct)})
-            </span>
-          </div>
-        </div>
-
-      </section>
+        </aside>
+      </main>
     </div>
   )
 }
