@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   fetchUniverse,
   fetchSectors,
@@ -22,7 +22,8 @@ import {
   CartesianGrid,
   ReferenceLine,
   Legend,
-  AreaChart
+  AreaChart,
+  Brush
 } from 'recharts'
 import './App.css'
 
@@ -90,6 +91,10 @@ function App() {
   const [lastUpdated, setLastUpdated] = useState(null)
   const [kisKeys, setKisKeys] = useState([])
   const [kisError, setKisError] = useState('')
+  const [modalOpen, setModalOpen] = useState(false)
+  const [zoomRange, setZoomRange] = useState({ start: 0, end: 0 })
+  const [zoomArmed, setZoomArmed] = useState(false)
+  const chartWheelRef = useRef(null)
 
   const loadData = (sectorOverride) => {
     const sector = typeof sectorOverride === 'string' ? sectorOverride : sectorFilter
@@ -158,6 +163,17 @@ function App() {
     setSelected(null)
   }, [sectorFilter])
 
+  useEffect(() => {
+    document.body.style.overflow = modalOpen ? 'hidden' : ''
+    return () => {
+      document.body.style.overflow = ''
+    }
+  }, [modalOpen])
+
+  useEffect(() => {
+    if (!modalOpen) setZoomArmed(false)
+  }, [modalOpen])
+
   const filtered = useMemo(() => {
     const target = asArray(universe).filter(u => u.group === filter)
     const keyword = search.trim().toLowerCase()
@@ -180,6 +196,11 @@ function App() {
   const previous = chartData.length > 1 ? chartData[chartData.length - 2] : null
   const delta = latest && previous ? latest.close - previous.close : 0
   const deltaPct = latest && previous && previous.close ? (delta / previous.close) * 100 : 0
+
+  useEffect(() => {
+    if (!chartData.length) return
+    setZoomRange({ start: 0, end: chartData.length - 1 })
+  }, [chartData.length, modalOpen])
 
   const planBuys = asArray(plans?.buys)
   const accountSummary = account?.summary || {}
@@ -263,15 +284,73 @@ function App() {
     ? `${lastUpdated.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`
     : '-'
 
-  const tableRows = useMemo(() => {
+  const zoomedData = useMemo(() => {
     if (!chartData.length) return []
-    return [...chartData].reverse().slice(0, 30)
-  }, [chartData])
+    const safeStart = Math.max(0, Math.min(zoomRange.start, chartData.length - 1))
+    const safeEnd = Math.max(safeStart, Math.min(zoomRange.end, chartData.length - 1))
+    return chartData.slice(safeStart, safeEnd + 1)
+  }, [chartData, zoomRange])
+
+  const tableRows = useMemo(() => {
+    const data = zoomedData.length ? zoomedData : chartData
+    if (!data.length) return []
+    return [...data].reverse().slice(0, 30)
+  }, [chartData, zoomedData])
 
   const expectedSellPrice = (price) => {
     const p = Number(price)
     if (!Number.isFinite(p) || !Number.isFinite(expectedReturn)) return null
     return p * (1 + expectedReturn)
+  }
+
+  const rangeOptions = [
+    { label: '1Y', value: 252 },
+    { label: '5Y', value: 252 * 5 },
+    { label: '10Y', value: 252 * 10 },
+    { label: 'MAX', value: 5000 }
+  ]
+
+  const handleChartWheel = (event) => {
+    if (!chartData.length) return
+    if (!zoomArmed) return
+    event.preventDefault()
+    event.stopPropagation()
+    const span = Math.max(1, zoomRange.end - zoomRange.start + 1)
+    const direction = event.deltaY > 0 ? 1 : -1
+    const delta = Math.max(1, Math.round(span * 0.15))
+    let nextSpan = span + (direction > 0 ? delta : -delta)
+    const minSpan = 20
+    const maxSpan = chartData.length
+    nextSpan = Math.min(maxSpan, Math.max(minSpan, nextSpan))
+    const rect = event.currentTarget.getBoundingClientRect()
+    const ratio = rect.width ? (event.clientX - rect.left) / rect.width : 0.5
+    const anchor = zoomRange.start + Math.round(span * ratio)
+    let newStart = Math.round(anchor - nextSpan * ratio)
+    let newEnd = newStart + nextSpan - 1
+    if (newStart < 0) {
+      newStart = 0
+      newEnd = nextSpan - 1
+    }
+    if (newEnd > chartData.length - 1) {
+      newEnd = chartData.length - 1
+      newStart = Math.max(0, newEnd - nextSpan + 1)
+    }
+    setZoomRange({ start: newStart, end: newEnd })
+  }
+
+  const handleChartWheelCallback = useCallback(handleChartWheel, [chartData, zoomRange, zoomArmed])
+
+  useEffect(() => {
+    const el = chartWheelRef.current
+    if (!el) return
+    const onWheel = (event) => handleChartWheelCallback(event)
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [handleChartWheelCallback])
+
+  const handleBrushChange = (range) => {
+    if (!range || range.startIndex == null || range.endIndex == null) return
+    setZoomRange({ start: range.startIndex, end: range.endIndex })
   }
 
   return (
@@ -307,8 +386,46 @@ function App() {
         </div>
       </header>
 
-      <main className="dashboard-grid">
-        <aside className="panel stock-panel">
+      <section id="summary" className="summary-strip">
+        <div className="summary-card">
+          <span>총자산</span>
+          <strong>{formatCurrency(accountSummary.total_assets)}</strong>
+          <em>계좌 {account?.connected ? '연결됨' : '미연결'}</em>
+        </div>
+        <div className="summary-card">
+          <span>현금</span>
+          <strong>{formatCurrency(accountSummary.cash)}</strong>
+          <em>잔고 조회</em>
+        </div>
+        <div className="summary-card">
+          <span>보유자산</span>
+          <strong>{formatCurrency(accountSummary.positions_value)}</strong>
+          <em>보유 평가액</em>
+        </div>
+        <div className="summary-card">
+          <span>수익률</span>
+          <strong className={accountSummary.total_pnl >= 0 ? 'up' : 'down'}>
+            {formatCurrency(accountSummary.total_pnl)}
+          </strong>
+          <em>{formatPct(accountSummary.total_pnl_pct)}</em>
+        </div>
+        <div className="summary-card">
+          <span>기대 수익률</span>
+          <strong>{expectedReturnPct === null ? '-' : `${expectedReturnPct.toFixed(2)}%`}</strong>
+          <em>자동매매 기준</em>
+        </div>
+      </section>
+
+      <nav className="section-nav">
+        <a href="#stocks">주식목록</a>
+        <a href="#filters">선별 과정</a>
+        <a href="#plans">매수 예상</a>
+        <a href="#results">자동매매 결과</a>
+        <a href="#account">계좌/수익률</a>
+      </nav>
+
+      <main className="layout">
+        <aside id="stocks" className="panel stock-panel">
           <div className="panel-head">
             <div>
               <h2>주식목록</h2>
@@ -327,7 +444,10 @@ function App() {
               <button
                 key={row.code}
                 className={`list-row ${selected?.code === row.code ? 'active' : ''}`}
-                onClick={() => setSelected(row)}
+                onClick={() => {
+                  setSelected(row)
+                  setModalOpen(true)
+                }}
               >
                 <div>
                   <div className="ticker">{row.code}</div>
@@ -345,7 +465,7 @@ function App() {
         </aside>
 
         <section className="content-column">
-          <div className="panel section">
+          <section id="filters" className="panel section">
             <div className="section-head">
               <div>
                 <h2>주식 종목 선별 과정</h2>
@@ -439,106 +559,11 @@ function App() {
                 </div>
               </div>
             ) : null}
-          </div>
+          </section>
 
-          <div className="panel section">
-            <div className="section-head">
-              <div>
-                <h2>차트 & 표테이블</h2>
-                <p>선택 종목의 가격 흐름과 표 데이터를 제공합니다.</p>
-              </div>
-              <span className="section-meta">
-                {selected ? `${selected.code} ${selected.name}` : '종목을 선택하세요'}
-              </span>
-            </div>
+          
 
-            {selected ? (
-              <div className="chart-grid">
-                <div className="chart-summary">
-                  <div>
-                    <div className="ticker">{selected.code}</div>
-                    <div className="name">{selected.name}</div>
-                    <div className="meta">{selected.market} · {selected.sector_name || 'UNKNOWN'}</div>
-                  </div>
-                  <div className={`delta ${delta >= 0 ? 'up' : 'down'}`}>
-                    <div className="delta-value">{formatCurrency(latest?.close)}</div>
-                    <div className="delta-sub">{formatPct(deltaPct)}</div>
-                  </div>
-                </div>
-
-                <div className="chart-card">
-                  <div className="chart-title">Price · MA25 · Volume</div>
-                  {pricesLoading ? (
-                    <div className="empty">차트 로딩 중...</div>
-                  ) : chartData.length === 0 ? (
-                    <div className="empty">가격 데이터가 없습니다.</div>
-                  ) : (
-                    <ResponsiveContainer width="100%" height={260}>
-                      <ComposedChart data={chartData} margin={{ left: 6, right: 18, top: 10, bottom: 8 }}>
-                        <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.08)" />
-                        <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} interval={Math.max(0, Math.floor(chartData.length / 6))} />
-                        <YAxis yAxisId="price" tick={{ fontSize: 11, fill: '#94a3b8' }} domain={['auto', 'auto']} />
-                        <YAxis yAxisId="volume" orientation="right" tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                        <Tooltip contentStyle={{ background: '#101827', border: '1px solid rgba(148,163,184,0.3)' }} labelStyle={{ color: '#e2e8f0' }} />
-                        <Legend wrapperStyle={{ color: '#cbd5f5' }} />
-                        <Area yAxisId="price" dataKey="close" stroke="#38bdf8" fill="rgba(14,116,144,0.35)" name="Close" />
-                        <Line yAxisId="price" type="monotone" dataKey="ma25" stroke="#f97316" dot={false} strokeWidth={2} name="MA25" />
-                        <Bar yAxisId="volume" dataKey="volume" fill="rgba(250,204,21,0.35)" name="Volume" />
-                      </ComposedChart>
-                    </ResponsiveContainer>
-                  )}
-                </div>
-
-                <div className="chart-card">
-                  <div className="chart-title">Disparity Flow</div>
-                  {chartData.length === 0 ? (
-                    <div className="empty">가격 데이터가 없습니다.</div>
-                  ) : (
-                    <ResponsiveContainer width="100%" height={160}>
-                      <AreaChart data={chartData} margin={{ left: 6, right: 18, top: 10, bottom: 8 }}>
-                        <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.08)" />
-                        <XAxis dataKey="date" hide />
-                        <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                        <Tooltip contentStyle={{ background: '#101827', border: '1px solid rgba(148,163,184,0.3)' }} labelStyle={{ color: '#e2e8f0' }} />
-                        <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="4 4" />
-                        <Area dataKey="disparity" stroke="#f43f5e" fill="rgba(248,113,113,0.3)" />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  )}
-                </div>
-
-                <div className="price-table">
-                  <div className="price-row head">
-                    <span>Date</span>
-                    <span>Open</span>
-                    <span>High</span>
-                    <span>Low</span>
-                    <span>Close</span>
-                    <span>Volume</span>
-                    <span>Amount</span>
-                    <span>Disp</span>
-                  </div>
-                  {tableRows.map((row) => (
-                    <div key={row.date} className="price-row">
-                      <span className="mono">{row.date}</span>
-                      <span>{formatCurrency(row.open)}</span>
-                      <span>{formatCurrency(row.high)}</span>
-                      <span>{formatCurrency(row.low)}</span>
-                      <span className="b">{formatCurrency(row.close)}</span>
-                      <span>{formatNumber(row.volume)}</span>
-                      <span>{formatCurrency(row.amount)}</span>
-                      <span>{formatPct((row.disparity || 0) * 100)}</span>
-                    </div>
-                  ))}
-                  {tableRows.length === 0 && <div className="empty">가격 데이터가 없습니다.</div>}
-                </div>
-              </div>
-            ) : (
-              <div className="placeholder">왼쪽에서 종목을 선택하세요.</div>
-            )}
-          </div>
-
-          <div className="panel section">
+          <section id="plans" className="panel section">
             <div className="section-head">
               <div>
                 <h2>자동매매 매수 예상</h2>
@@ -562,9 +587,9 @@ function App() {
               ))}
               {planBuys.length === 0 && <div className="empty">매수 예정 종목이 없습니다.</div>}
             </div>
-          </div>
+          </section>
 
-          <div className="panel section">
+          <section id="results" className="panel section">
             <div className="section-head">
               <div>
                 <h2>자동매매 결과</h2>
@@ -599,73 +624,200 @@ function App() {
                 {formatCurrency(portfolioTotals.pnl)} ({formatPct(portfolioTotals.pnl_pct)})
               </strong>
             </div>
-          </div>
+          </section>
+
+          <section id="account" className="panel section">
+            <div className="section-head">
+              <div>
+                <h2>계좌 온오프</h2>
+                <p>KIS 계좌를 실전 모드로 제어합니다.</p>
+              </div>
+              <span className="section-meta">{account?.connected ? '연결됨' : '미연결'}</span>
+            </div>
+            {kisError ? <div className="error-banner">{kisError}</div> : null}
+            <div className="kis-list">
+              {kisKeys.map((row) => (
+                <div key={row.id} className={`kis-row ${row.enabled ? 'on' : 'off'}`}>
+                  <div className="kis-main">
+                    <div className="kis-label">{row.account || row.id}</div>
+                    <div className="kis-desc">{row.description || row.user || '실전 계좌'}</div>
+                  </div>
+                  <div className="kis-meta">
+                    <span>{row.env || 'real'}</span>
+                    <span>{row.updated_at ? formatTime(row.updated_at) : '-'}</span>
+                  </div>
+                  <button className={`kis-toggle ${row.enabled ? 'on' : 'off'}`} onClick={() => handleKisToggle(row)}>
+                    {row.enabled ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+              ))}
+              {kisKeys.length === 0 && <div className="empty">등록된 계좌가 없습니다.</div>}
+            </div>
+
+            <div className="divider" />
+
+            <div className="section-head">
+              <div>
+                <h2>잔고 · 수익률</h2>
+                <p>현재 잔고와 누적 수익률을 확인합니다.</p>
+              </div>
+              <span className="section-meta">{account?.connected_at ? new Date(account.connected_at).toLocaleDateString('ko-KR') : '-'}</span>
+            </div>
+            {account?.connected ? (
+              <div className="account-metrics">
+                <div className="metric-card">
+                  <span>총자산</span>
+                  <strong>{formatCurrency(accountSummary.total_assets)}</strong>
+                </div>
+                <div className="metric-card">
+                  <span>현금</span>
+                  <strong>{formatCurrency(accountSummary.cash)}</strong>
+                </div>
+                <div className="metric-card">
+                  <span>보유자산</span>
+                  <strong>{formatCurrency(accountSummary.positions_value)}</strong>
+                </div>
+                <div className="metric-card">
+                  <span>수익률</span>
+                  <strong className={accountSummary.total_pnl >= 0 ? 'up' : 'down'}>
+                    {formatCurrency(accountSummary.total_pnl)}
+                  </strong>
+                  <em>{formatPct(accountSummary.total_pnl_pct)}</em>
+                </div>
+              </div>
+            ) : (
+              <div className="empty">자동매매 계좌 연결 정보를 불러오지 못했습니다.</div>
+            )}
+          </section>
         </section>
-
-        <aside className="panel account-panel">
-          <div className="section-head">
-            <div>
-              <h2>계좌 온오프</h2>
-              <p>KIS 계좌를 실전 모드로 제어합니다.</p>
-            </div>
-            <span className="section-meta">{account?.connected ? '연결됨' : '미연결'}</span>
-          </div>
-          {kisError ? <div className="error-banner">{kisError}</div> : null}
-          <div className="kis-list">
-            {kisKeys.map((row) => (
-              <div key={row.id} className={`kis-row ${row.enabled ? 'on' : 'off'}`}>
-                <div className="kis-main">
-                  <div className="kis-label">{row.account || row.id}</div>
-                  <div className="kis-desc">{row.description || row.user || '실전 계좌'}</div>
-                </div>
-                <div className="kis-meta">
-                  <span>{row.env || 'real'}</span>
-                  <span>{row.updated_at ? formatTime(row.updated_at) : '-'}</span>
-                </div>
-                <button className={`kis-toggle ${row.enabled ? 'on' : 'off'}`} onClick={() => handleKisToggle(row)}>
-                  {row.enabled ? 'ON' : 'OFF'}
-                </button>
-              </div>
-            ))}
-            {kisKeys.length === 0 && <div className="empty">등록된 계좌가 없습니다.</div>}
-          </div>
-
-          <div className="divider" />
-
-          <div className="section-head">
-            <div>
-              <h2>잔고 · 수익률</h2>
-              <p>현재 잔고와 누적 수익률을 확인합니다.</p>
-            </div>
-            <span className="section-meta">{account?.connected_at ? new Date(account.connected_at).toLocaleDateString('ko-KR') : '-'}</span>
-          </div>
-          {account?.connected ? (
-            <div className="account-metrics">
-              <div className="metric-card">
-                <span>총자산</span>
-                <strong>{formatCurrency(accountSummary.total_assets)}</strong>
-              </div>
-              <div className="metric-card">
-                <span>현금</span>
-                <strong>{formatCurrency(accountSummary.cash)}</strong>
-              </div>
-              <div className="metric-card">
-                <span>보유자산</span>
-                <strong>{formatCurrency(accountSummary.positions_value)}</strong>
-              </div>
-              <div className="metric-card">
-                <span>수익률</span>
-                <strong className={accountSummary.total_pnl >= 0 ? 'up' : 'down'}>
-                  {formatCurrency(accountSummary.total_pnl)}
-                </strong>
-                <em>{formatPct(accountSummary.total_pnl_pct)}</em>
-              </div>
-            </div>
-          ) : (
-            <div className="empty">자동매매 계좌 연결 정보를 불러오지 못했습니다.</div>
-          )}
-        </aside>
       </main>
+
+      {selected && modalOpen ? (
+        <div className="modal-overlay" onClick={(e) => {
+          if (e.target === e.currentTarget) setModalOpen(false)
+        }}>
+          <div className="modal-panel">
+            <div className="modal-head">
+              <div>
+                <div className="ticker">{selected.code}</div>
+                <div className="name">{selected.name}</div>
+                <div className="meta">{selected.market} · {selected.sector_name || 'UNKNOWN'}</div>
+              </div>
+              <div className="modal-actions">
+                <div className="range-tabs">
+                  {rangeOptions.map((option) => (
+                    <button
+                      key={option.label}
+                      className={days === option.value ? 'active' : ''}
+                      onClick={() => setDays(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className={`zoom-toggle ${zoomArmed ? 'on' : ''}`}
+                  onClick={() => setZoomArmed((prev) => !prev)}
+                >
+                  휠 확대 {zoomArmed ? 'ON' : 'OFF'}
+                </button>
+                <button className="modal-close" onClick={() => setModalOpen(false)}>닫기</button>
+              </div>
+            </div>
+
+            <div className="chart-grid">
+              <div className="chart-summary">
+                <div>
+                  <div className="ticker">{selected.code}</div>
+                  <div className="name">{selected.name}</div>
+                  <div className="meta">{selected.market} · {selected.sector_name || 'UNKNOWN'}</div>
+                </div>
+                <div className={`delta ${delta >= 0 ? 'up' : 'down'}`}>
+                  <div className="delta-value">{formatCurrency(latest?.close)}</div>
+                  <div className="delta-sub">{formatPct(deltaPct)}</div>
+                </div>
+              </div>
+
+              <div className="chart-card chart-zoom" ref={chartWheelRef}>
+                <div className="chart-title">Price · MA25 · Volume</div>
+                {pricesLoading ? (
+                  <div className="empty">차트 로딩 중...</div>
+                ) : chartData.length === 0 ? (
+                  <div className="empty">가격 데이터가 없습니다.</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <ComposedChart data={zoomedData.length ? zoomedData : chartData} margin={{ left: 6, right: 18, top: 10, bottom: 8 }}>
+                      <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.08)" />
+                      <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} interval={Math.max(0, Math.floor((zoomedData.length || chartData.length) / 6))} />
+                      <YAxis yAxisId="price" tick={{ fontSize: 11, fill: '#94a3b8' }} domain={['auto', 'auto']} />
+                      <YAxis yAxisId="volume" orientation="right" tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                      <Tooltip contentStyle={{ background: '#101827', border: '1px solid rgba(148,163,184,0.3)' }} labelStyle={{ color: '#e2e8f0' }} />
+                      <Legend wrapperStyle={{ color: '#cbd5f5' }} />
+                      <Area yAxisId="price" dataKey="close" stroke="#38bdf8" fill="rgba(14,116,144,0.35)" name="Close" />
+                      <Line yAxisId="price" type="monotone" dataKey="ma25" stroke="#f97316" dot={false} strokeWidth={2} name="MA25" />
+                      <Bar yAxisId="volume" dataKey="volume" fill="rgba(250,204,21,0.35)" name="Volume" />
+                      <Brush
+                        dataKey="date"
+                        height={24}
+                        stroke="#38bdf8"
+                        travellerWidth={10}
+                        startIndex={zoomRange.start}
+                        endIndex={zoomRange.end}
+                        onChange={handleBrushChange}
+                        data={chartData}
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+
+              <div className="chart-card">
+                <div className="chart-title">Disparity Flow</div>
+                {chartData.length === 0 ? (
+                  <div className="empty">가격 데이터가 없습니다.</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={160}>
+                    <AreaChart data={zoomedData.length ? zoomedData : chartData} margin={{ left: 6, right: 18, top: 10, bottom: 8 }}>
+                      <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.08)" />
+                      <XAxis dataKey="date" hide />
+                      <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                      <Tooltip contentStyle={{ background: '#101827', border: '1px solid rgba(148,163,184,0.3)' }} labelStyle={{ color: '#e2e8f0' }} />
+                      <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="4 4" />
+                      <Area dataKey="disparity" stroke="#f43f5e" fill="rgba(248,113,113,0.3)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+
+              <div className="price-table">
+                <div className="price-row head">
+                  <span>Date</span>
+                  <span>Open</span>
+                  <span>High</span>
+                  <span>Low</span>
+                  <span>Close</span>
+                  <span>Volume</span>
+                  <span>Amount</span>
+                  <span>Disp</span>
+                </div>
+                {tableRows.map((row) => (
+                  <div key={row.date} className="price-row">
+                    <span className="mono">{row.date}</span>
+                    <span>{formatCurrency(row.open)}</span>
+                    <span>{formatCurrency(row.high)}</span>
+                    <span>{formatCurrency(row.low)}</span>
+                    <span className="b">{formatCurrency(row.close)}</span>
+                    <span>{formatNumber(row.volume)}</span>
+                    <span>{formatCurrency(row.amount)}</span>
+                    <span>{formatPct((row.disparity || 0) * 100)}</span>
+                  </div>
+                ))}
+                {tableRows.length === 0 && <div className="empty">가격 데이터가 없습니다.</div>}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
