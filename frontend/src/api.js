@@ -18,9 +18,12 @@ export const fetchPortfolio = () => api.get('/portfolio').then(r => r.data);
 export const fetchPlans = () => api.get('/plans').then(r => r.data);
 export const fetchAccount = () => api.get('/account').then(r => r.data);
 export const fetchSelection = () => api.get('/selection').then(r => r.data);
+export const fetchSelectionFilters = () => api.get('/selection_filters').then(r => r.data);
 export const fetchStrategy = () => api.get('/strategy').then(r => r.data);
 export const fetchJobs = () => api.get('/jobs').then(r => r.data);
 export const triggerExport = () => api.post('/export').then(r => r.data);
 export const fetchKisKeys = () => api.get('/kis_keys').then(r => r.data);
 export const updateKisKeyToggle = (id, enabled, password) =>
   api.post('/kis_keys/toggle', { id, enabled, password }).then(r => r.data);
+export const updateSelectionFilterToggle = (key, enabled, password) =>
+  api.post('/selection_filters/toggle', { key, enabled, password }).then(r => r.data);

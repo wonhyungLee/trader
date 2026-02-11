@@ -6,9 +6,11 @@ import {
   fetchPlans,
   fetchAccount,
   fetchSelection,
+  fetchSelectionFilters,
   fetchPortfolio,
   fetchKisKeys,
-  updateKisKeyToggle
+  updateKisKeyToggle,
+  updateSelectionFilterToggle
 } from './api'
 import {
   ResponsiveContainer,
@@ -91,10 +93,13 @@ function App() {
   const [lastUpdated, setLastUpdated] = useState(null)
   const [kisKeys, setKisKeys] = useState([])
   const [kisError, setKisError] = useState('')
+  const [filterToggles, setFilterToggles] = useState({ min_amount: true, liquidity: true, disparity: true })
+  const [filterError, setFilterError] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [zoomRange, setZoomRange] = useState({ start: 0, end: 0 })
   const [zoomArmed, setZoomArmed] = useState(false)
   const chartWheelRef = useRef(null)
+  const [openHelp, setOpenHelp] = useState(null)
 
   const loadData = (sectorOverride) => {
     const sector = typeof sectorOverride === 'string' ? sectorOverride : sectorFilter
@@ -130,7 +135,22 @@ function App() {
         pricing: payload.pricing && typeof payload.pricing === 'object' ? payload.pricing : {},
         stage_items: payload.stage_items && typeof payload.stage_items === 'object' ? payload.stage_items : {},
       })
+      if (payload.filter_toggles && typeof payload.filter_toggles === 'object') {
+        setFilterToggles({
+          min_amount: payload.filter_toggles.min_amount !== false,
+          liquidity: payload.filter_toggles.liquidity !== false,
+          disparity: payload.filter_toggles.disparity !== false,
+        })
+      }
     })
+    fetchSelectionFilters().then((data) => {
+      const payload = data && typeof data === 'object' ? data : {}
+      setFilterToggles({
+        min_amount: payload.min_amount !== false,
+        liquidity: payload.liquidity !== false,
+        disparity: payload.disparity !== false,
+      })
+    }).catch(() => {})
     fetchKisKeys().then((data) => setKisKeys(asArray(data))).catch(() => setKisKeys([]))
     setLastUpdated(new Date())
   }
@@ -225,6 +245,23 @@ function App() {
     }
   }
 
+  const handleFilterToggle = async (key) => {
+    const password = window.prompt('필터 토글 비밀번호를 입력하세요')
+    if (!password) return
+    try {
+      const updated = await updateSelectionFilterToggle(key, !filterToggles[key], password)
+      setFilterToggles({
+        min_amount: updated.min_amount !== false,
+        liquidity: updated.liquidity !== false,
+        disparity: updated.disparity !== false,
+      })
+      setFilterError('')
+      loadData()
+    } catch (e) {
+      setFilterError('비밀번호가 올바르지 않거나 서버 오류가 발생했습니다.')
+    }
+  }
+
   const formatStageValue = (stage) => {
     if (!stage) return '-'
     if (stage.key === 'min_amount') return formatCurrency(stage.value)
@@ -244,6 +281,17 @@ function App() {
     liquidity: 'Filter 2',
     disparity: 'Filter 3',
     final: 'Final'
+  }
+
+  const stageHelp = {
+    min_amount: '최근 거래대금이 일정 기준 이상인 종목만 남깁니다. 거래가 활발한 종목만 먼저 걸러내는 단계입니다.',
+    liquidity: '거래대금 상위 순위만 선택합니다. 사고팔기 쉬운(유동성 높은) 종목을 우선으로 봅니다.',
+    disparity: '현재 가격이 이동평균(MA25) 대비 얼마나 낮거나 높은지 확인합니다. 기준값에 맞는 종목만 통과합니다.',
+    final: '모든 필터를 통과한 종목 중 최대 보유 종목 수만큼 최종 후보로 선택합니다.'
+  }
+
+  const toggleHelp = (key) => {
+    setOpenHelp(prev => (prev === key ? null : key))
   }
 
   const stageMap = useMemo(() => {
@@ -473,6 +521,7 @@ function App() {
               </div>
               <span className="section-meta">기준일 {selection?.date || '-'}</span>
             </div>
+            {filterError ? <div className="error-banner">{filterError}</div> : null}
             <div className="flow-grid">
               {stageNodes.map((stage) => (
                 <div key={stage.key} className="flow-card">
@@ -497,11 +546,32 @@ function App() {
 
             <div className="filter-columns">
               {stageColumns.map((stage) => (
-                <div key={stage.key} className="filter-column">
+                <div key={stage.key} className={`filter-column ${filterToggles[stage.key] === false ? 'disabled' : ''}`}>
                   <div className="filter-head">
                     <div>
                       <div className="filter-tag">{stage.tag}</div>
-                      <div className="filter-title">{stage.label}</div>
+                      <div className="filter-title-row">
+                        <div className="filter-title">{stage.label}</div>
+                        <button
+                          type="button"
+                          className="help-icon"
+                          aria-label={`${stage.label} 설명`}
+                          aria-expanded={openHelp === stage.key}
+                          onClick={() => toggleHelp(stage.key)}
+                        >
+                          ?
+                        </button>
+                        <button
+                          type="button"
+                          className={`filter-toggle ${filterToggles[stage.key] === false ? 'off' : 'on'}`}
+                          onClick={() => handleFilterToggle(stage.key)}
+                        >
+                          {filterToggles[stage.key] === false ? 'OFF' : 'ON'}
+                        </button>
+                      </div>
+                      {openHelp === stage.key ? (
+                        <div className="help-bubble">{stageHelp[stage.key]}</div>
+                      ) : null}
                       <div className="filter-criteria">{stage.criteria}</div>
                     </div>
                     <div className="filter-count">{stage.count}</div>
@@ -535,7 +605,21 @@ function App() {
                 <div className="final-head">
                   <div>
                     <div className="filter-tag">Final</div>
-                    <div className="final-title">{finalStage.label}</div>
+                    <div className="filter-title-row">
+                      <div className="final-title">{finalStage.label}</div>
+                      <button
+                        type="button"
+                        className="help-icon"
+                        aria-label="Final 설명"
+                        aria-expanded={openHelp === 'final'}
+                        onClick={() => toggleHelp('final')}
+                      >
+                        ?
+                      </button>
+                    </div>
+                    {openHelp === 'final' ? (
+                      <div className="help-bubble">{stageHelp.final}</div>
+                    ) : null}
                     <div className="filter-criteria">{finalStage.criteria}</div>
                   </div>
                   <div className="filter-count">{finalStage.count}</div>

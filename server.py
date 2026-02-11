@@ -15,13 +15,19 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 from src.utils.config import load_settings, list_kis_key_inventory, set_kis_key_enabled
+from src.utils.project_root import ensure_repo_root
 from src.utils.db_exporter import maybe_export_db
 from src.analyzer.backtest_runner import load_strategy
+
+# Ensure relative paths resolve from repo root (e.g. 개인정보, data/*)
+ensure_repo_root(Path(__file__).resolve().parent)
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 CLIENT_ERROR_LOG = Path("logs/client_error.log")
 KIS_TOGGLE_PASSWORD = os.getenv("KIS_TOGGLE_PASSWORD", "lee37535**")
+FILTER_TOGGLE_PATH = Path("data/selection_filter_toggles.json")
+FILTER_TOGGLE_KEYS = ("min_amount", "liquidity", "disparity")
 
 DB_PATH = Path('data/market_data.db')
 FRONTEND_DIST = Path('frontend/dist')
@@ -88,6 +94,29 @@ def _read_accuracy_progress() -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
+
+
+def _load_filter_toggles(path: Path = FILTER_TOGGLE_PATH) -> Dict[str, bool]:
+    defaults = {key: True for key in FILTER_TOGGLE_KEYS}
+    if not path.exists():
+        return defaults
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return defaults
+    if not isinstance(payload, dict):
+        return defaults
+    out = defaults.copy()
+    for key in FILTER_TOGGLE_KEYS:
+        if key in payload:
+            out[key] = bool(payload.get(key))
+    return out
+
+
+def _save_filter_toggles(toggles: Dict[str, bool], path: Path = FILTER_TOGGLE_PATH) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {key: bool(toggles.get(key, True)) for key in FILTER_TOGGLE_KEYS}
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -300,6 +329,10 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
     trend_filter = bool(getattr(params, "trend_ma25_rising", False))
     initial_cash = float(getattr(params, "initial_cash", 0) or 0)
     capital_utilization = float(getattr(params, "capital_utilization", 0) or 0)
+    filter_toggles = _load_filter_toggles()
+    min_enabled = filter_toggles.get("min_amount", True)
+    liq_enabled = filter_toggles.get("liquidity", True)
+    disp_enabled = filter_toggles.get("disparity", True)
 
     universe = pd.read_sql_query("SELECT code, name, market, group_name FROM universe_members", conn)
     codes = universe["code"].dropna().astype(str).tolist()
@@ -332,9 +365,9 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
     latest = latest.merge(universe, on="code", how="left")
 
     total = len(latest)
-    stage_min = latest[latest["amount"] >= min_amount] if min_amount else latest
+    stage_min = latest[latest["amount"] >= min_amount] if min_amount and min_enabled else latest
     stage_liq = stage_min.sort_values("amount", ascending=False)
-    if liquidity_rank:
+    if liquidity_rank and liq_enabled:
         stage_liq = stage_liq.head(liquidity_rank)
 
     def _pass_disparity(row) -> bool:
@@ -349,8 +382,8 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
         except Exception:
             return False
 
-    stage_disp = stage_liq[stage_liq.apply(_pass_disparity, axis=1)]
-    if trend_filter:
+    stage_disp = stage_liq[stage_liq.apply(_pass_disparity, axis=1)] if disp_enabled else stage_liq
+    if disp_enabled and trend_filter:
         stage_disp = stage_disp[stage_disp["ma25_prev"].notna() & (stage_disp["ma25"] > stage_disp["ma25_prev"])]
 
     stage_ranked = stage_disp.copy()
@@ -403,11 +436,11 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
     candidates = final[["code", "name", "market", "amount", "close", "disparity", "rank", "sector_name", "industry_name"]].fillna("").to_dict(orient="records")
 
     stages = [
-        {"key": "universe", "label": "Universe", "count": total, "value": len(codes)},
-        {"key": "min_amount", "label": "Amount Filter", "count": len(stage_min), "value": min_amount},
-        {"key": "liquidity", "label": "Liquidity Rank", "count": len(stage_liq), "value": liquidity_rank},
-        {"key": "disparity", "label": "Disparity Threshold", "count": len(stage_disp), "value": {"kospi": buy_kospi, "kosdaq": buy_kosdaq}},
-        {"key": "final", "label": "Max Positions", "count": len(final), "value": max_positions},
+        {"key": "universe", "label": "Universe", "count": total, "value": len(codes), "enabled": True},
+        {"key": "min_amount", "label": "Amount Filter", "count": len(stage_min), "value": min_amount, "enabled": min_enabled},
+        {"key": "liquidity", "label": "Liquidity Rank", "count": len(stage_liq), "value": liquidity_rank, "enabled": liq_enabled},
+        {"key": "disparity", "label": "Disparity Threshold", "count": len(stage_disp), "value": {"kospi": buy_kospi, "kosdaq": buy_kosdaq}, "enabled": disp_enabled},
+        {"key": "final", "label": "Max Positions", "count": len(final), "value": max_positions, "enabled": True},
     ]
 
     order_value = settings.get("trading", {}).get("order_value")
@@ -471,6 +504,7 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
             "max_positions": max_positions,
             "max_per_sector": max_per_sector,
         },
+        "filter_toggles": filter_toggles,
         "pricing": pricing,
     }
     _selection_cache.update({"ts": now_ts, "data": data})
@@ -862,6 +896,27 @@ def kis_keys_toggle():
     updated = set_kis_key_enabled(idx, enabled)
     return jsonify(updated)
 
+
+@app.get('/selection_filters')
+def selection_filters():
+    return jsonify(_load_filter_toggles())
+
+
+@app.post('/selection_filters/toggle')
+def selection_filters_toggle():
+    payload = request.get_json(silent=True) or {}
+    if not _verify_toggle_password(payload):
+        return jsonify({"error": "invalid_password"}), 403
+    key = str(payload.get("key") or "")
+    if key not in FILTER_TOGGLE_KEYS:
+        return jsonify({"error": "invalid_key"}), 400
+    enabled = bool(payload.get("enabled"))
+    toggles = _load_filter_toggles()
+    toggles[key] = enabled
+    _save_filter_toggles(toggles)
+    _selection_cache["ts"] = 0
+    return jsonify(toggles)
+
 # CSV 내보내기 엔드포인트
 @app.post('/export')
 def export_csv():
@@ -888,6 +943,8 @@ def _register_bnf_aliases():
         ("/strategy", strategy, ["GET"]),
         ("/kis_keys", kis_keys, ["GET"]),
         ("/kis_keys/toggle", kis_keys_toggle, ["POST"]),
+        ("/selection_filters", selection_filters, ["GET"]),
+        ("/selection_filters/toggle", selection_filters_toggle, ["POST"]),
         ("/export", export_csv, ["POST"]),
     ]
     for path, view, methods in aliases:
