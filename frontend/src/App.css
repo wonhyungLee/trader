@@ -615,6 +615,87 @@ body {
   margin-bottom: 10px;
 }
 
+.error-banner {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  background: rgba(248, 113, 113, 0.12);
+  color: #fecaca;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.kis-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.kis-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.kis-row.off {
+  opacity: 0.6;
+}
+
+.kis-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kis-label {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.kis-desc {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.kis-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+  min-width: 90px;
+}
+
+.kis-toggle {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  min-width: 60px;
+}
+
+.kis-toggle.on {
+  background: rgba(16, 185, 129, 0.2);
+  color: var(--ok);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.kis-toggle.off {
+  background: rgba(249, 115, 22, 0.2);
+  color: var(--err);
+  border-color: rgba(249, 115, 22, 0.4);
+}
+
 .mini-table {
   display: grid;
   gap: 8px;

@@ -14,13 +14,14 @@ import numpy as np
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
-from src.utils.config import load_settings
+from src.utils.config import load_settings, list_kis_key_inventory, set_kis_key_enabled
 from src.utils.db_exporter import maybe_export_db
 from src.analyzer.backtest_runner import load_strategy
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 CLIENT_ERROR_LOG = Path("logs/client_error.log")
+KIS_TOGGLE_PASSWORD = os.getenv("KIS_TOGGLE_PASSWORD", "lee37535**")
 
 DB_PATH = Path('data/market_data.db')
 FRONTEND_DIST = Path('frontend/dist')
@@ -493,6 +494,11 @@ def _read_accuracy_lock() -> dict:
             running = False
     return {"running": running, "pid": pid}
 
+
+def _verify_toggle_password(payload: Dict[str, Any]) -> bool:
+    pw = str(payload.get("password") or "")
+    return pw == KIS_TOGGLE_PASSWORD
+
 @app.route('/')
 def serve_index():
     return send_from_directory(app.static_folder, 'index.html')
@@ -835,6 +841,27 @@ def strategy():
         "ord_dvsn": trading.get("ord_dvsn")
     })
 
+
+@app.get('/kis_keys')
+def kis_keys():
+    return jsonify(list_kis_key_inventory())
+
+
+@app.post('/kis_keys/toggle')
+def kis_keys_toggle():
+    payload = request.get_json(silent=True) or {}
+    if not _verify_toggle_password(payload):
+        return jsonify({"error": "invalid_password"}), 403
+    try:
+        idx = int(payload.get("id"))
+    except Exception:
+        return jsonify({"error": "invalid_id"}), 400
+    if idx < 1 or idx > 8:
+        return jsonify({"error": "invalid_id"}), 400
+    enabled = bool(payload.get("enabled"))
+    updated = set_kis_key_enabled(idx, enabled)
+    return jsonify(updated)
+
 # CSV 내보내기 엔드포인트
 @app.post('/export')
 def export_csv():
@@ -859,6 +886,8 @@ def _register_bnf_aliases():
         ("/jobs", jobs, ["GET"]),
         ("/engines", engines, ["GET"]),
         ("/strategy", strategy, ["GET"]),
+        ("/kis_keys", kis_keys, ["GET"]),
+        ("/kis_keys/toggle", kis_keys_toggle, ["POST"]),
         ("/export", export_csv, ["POST"]),
     ]
     for path, view, methods in aliases:

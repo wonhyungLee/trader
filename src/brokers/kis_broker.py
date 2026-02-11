@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional
 import requests
 from requests import HTTPError, RequestException
 
-from src.utils.config import load_settings, load_kis_keys
+from src.utils.config import load_settings, load_kis_keys, has_kis_toggle_file, has_personal_kis_records
 from src.utils.http_retry import is_retryable_status, sleep_backoff
 from src.utils.rate_limiter import RateLimiter
 
@@ -137,6 +137,8 @@ class KISBroker:
     def __init__(self, settings: Optional[Dict[str, Any]] = None):
         self.settings = settings or load_settings()
         self.env = self.settings.get("kis", {}).get("env", self.settings.get("env", "paper"))
+        if self.env != "prod":
+            raise RuntimeError("paper trading is disabled: set env=prod in config/settings.yaml")
         self.custtype = self.settings["kis"].get("custtype", "P")
         self.rate_limit_sleep = float(self.settings["kis"].get("rate_limit_sleep_sec", 0.5))
         self.timeout_connect = float(self.settings["kis"].get("timeout_connect_sec", 5))
@@ -169,9 +171,11 @@ class KISBroker:
         self.use_hashkey = bool(self.settings["kis"].get("use_hashkey", False))
         self.hashkey_cache_ttl = float(self.settings["kis"].get("hashkey_cache_ttl_sec", 30))
 
-        # Load multiple keys for rotation
+        # Load multiple keys for rotation (enabled only)
         key_configs = load_kis_keys()
         if not key_configs:
+            if has_kis_toggle_file() and has_personal_kis_records():
+                raise RuntimeError("No enabled KIS keys. Enable at least one in the dashboard.")
             # Fallback to single key from settings/env if no keys found in 개인정보
             key_configs = [{
                 "app_key": self.settings["kis"].get("app_key"),

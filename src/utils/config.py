@@ -1,10 +1,131 @@
 import os
 import re
+import json
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
 import yaml
-from typing import Any, Dict, List
 
 
 _env_pattern = re.compile(r"\${([^}]+)}")
+_kis_key_pattern = re.compile(r"^KIS(\d+)_(KEY|SECRET|ACCOUNT_NUMBER|ACCOUNT_CODE)\s*=\s*(.*)$")
+_kis_desc_keywords = ("계좌", "한투", "ISA", "연금")
+_kis_toggle_path = os.path.join("data", "kis_key_toggles.json")
+
+
+def _mask_account_no(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) <= 4:
+        return "*" * len(text)
+    return ("*" * (len(text) - 4)) + text[-4:]
+
+
+def _parse_personal_kis_records(path: str = "개인정보") -> Dict[int, Dict[str, str]]:
+    if not os.path.exists(path):
+        return {}
+
+    records: Dict[int, Dict[str, str]] = {}
+    last_idx: Optional[int] = None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line:
+                    continue
+                if line.startswith("#"):
+                    comment = line.lstrip("#").strip()
+                    if last_idx is not None:
+                        rec = records.get(last_idx, {})
+                        if comment and not rec.get("description"):
+                            if any(k in comment for k in _kis_desc_keywords):
+                                rec["description"] = comment
+                                records[last_idx] = rec
+                    continue
+
+                m = _kis_key_pattern.match(line)
+                if not m:
+                    last_idx = None
+                    continue
+                idx = int(m.group(1))
+                field = m.group(2)
+                value = m.group(3).strip().strip('"').strip("'")
+                rec = records.setdefault(idx, {})
+                if field == "KEY":
+                    rec["app_key"] = value
+                elif field == "SECRET":
+                    rec["app_secret"] = value
+                elif field == "ACCOUNT_NUMBER":
+                    rec["account_no"] = value
+                elif field == "ACCOUNT_CODE":
+                    rec["account_product"] = value
+                records[idx] = rec
+                last_idx = idx
+    except Exception:
+        return records
+    return records
+
+
+def _load_kis_toggle_state(path: str = _kis_toggle_path) -> Dict[str, bool]:
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            if "keys" in data and isinstance(data["keys"], dict):
+                return {str(k): bool(v) for k, v in data["keys"].items()}
+            return {str(k): bool(v) for k, v in data.items()}
+    except Exception:
+        return {}
+    return {}
+
+
+def _save_kis_toggle_state(keys: Dict[str, bool], path: str = _kis_toggle_path) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    payload = {
+        "updated_at": datetime.utcnow().isoformat(),
+        "keys": {str(k): bool(v) for k, v in keys.items()},
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+def has_kis_toggle_file(path: str = _kis_toggle_path) -> bool:
+    return os.path.exists(path)
+
+
+def has_personal_kis_records(path: str = "개인정보") -> bool:
+    return bool(_parse_personal_kis_records(path))
+
+
+def list_kis_key_inventory(max_index: int = 8) -> List[Dict[str, Any]]:
+    records = _parse_personal_kis_records()
+    toggles = _load_kis_toggle_state()
+    inventory: List[Dict[str, Any]] = []
+    for idx in range(1, max_index + 1):
+        rec = records.get(idx)
+        if not rec:
+            continue
+        inventory.append({
+            "id": idx,
+            "label": f"KIS{idx}",
+            "description": rec.get("description", ""),
+            "account_no_masked": _mask_account_no(rec.get("account_no")),
+            "account_code": rec.get("account_product"),
+            "enabled": bool(toggles.get(str(idx), True)),
+        })
+    return inventory
+
+
+def set_kis_key_enabled(idx: int, enabled: bool) -> List[Dict[str, Any]]:
+    toggles = _load_kis_toggle_state()
+    toggles[str(idx)] = bool(enabled)
+    _save_kis_toggle_state(toggles)
+    return list_kis_key_inventory()
 
 
 def _load_dotenv(path: str = ".env") -> None:
@@ -116,38 +237,24 @@ def _sub_env(value: str) -> str:
 
 
 def load_kis_keys() -> List[Dict[str, str]]:
-    """Extract all KIS{n} key sets from the 개인정보 file."""
-    path = "개인정보"
-    if not os.path.exists(path):
+    """Extract enabled KIS{n} key sets from the 개인정보 file."""
+    records = _parse_personal_kis_records()
+    if not records:
         return []
-
-    kv: Dict[str, str] = {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            for raw in f:
-                line = raw.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                if key:
-                    kv[key] = value
-    except Exception:
-        return []
-
-    keys = []
-    for i in range(1, 51):
-        app_key = kv.get(f"KIS{i}_KEY")
-        app_secret = kv.get(f"KIS{i}_SECRET")
-        account_no = kv.get(f"KIS{i}_ACCOUNT_NUMBER")
-        account_product = kv.get(f"KIS{i}_ACCOUNT_CODE")
+    toggles = _load_kis_toggle_state()
+    keys: List[Dict[str, str]] = []
+    for i in sorted(records.keys()):
+        rec = records[i]
+        if toggles and toggles.get(str(i), True) is False:
+            continue
+        app_key = rec.get("app_key")
+        app_secret = rec.get("app_secret")
         if app_key and app_secret:
             keys.append({
                 "app_key": app_key,
                 "app_secret": app_secret,
-                "account_no": account_no,
-                "account_product": account_product or "01"
+                "account_no": rec.get("account_no"),
+                "account_product": rec.get("account_product") or "01",
             })
     return keys
 

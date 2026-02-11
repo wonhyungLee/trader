@@ -13,7 +13,9 @@ import {
   fetchAccount,
   fetchSelection,
   fetchStrategy,
-  fetchJobs
+  fetchJobs,
+  fetchKisKeys,
+  updateKisKeyToggle
 } from './api'
 import {
   ResponsiveContainer,
@@ -102,6 +104,8 @@ function App() {
   const [sectorFilter, setSectorFilter] = useState('ALL')
   const [search, setSearch] = useState('')
   const [lastUpdated, setLastUpdated] = useState(null)
+  const [kisKeys, setKisKeys] = useState([])
+  const [kisError, setKisError] = useState('')
 
   const loadData = (sectorOverride) => {
     const sector = typeof sectorOverride === 'string' ? sectorOverride : sectorFilter
@@ -145,6 +149,7 @@ function App() {
     })
     fetchStrategy().then((data) => setStrategy(data && typeof data === 'object' ? data : null))
     fetchJobs().then((data) => setJobs(asArray(data)))
+    fetchKisKeys().then((data) => setKisKeys(asArray(data))).catch(() => setKisKeys([]))
     setLastUpdated(new Date())
   }
 
@@ -230,6 +235,18 @@ function App() {
   const scanMode = selection?.mode || 'DAILY'
   const scanModeReason = selection?.mode_reason
   const activeStageItems = asArray(selectionStageItems[activeStage])
+
+  const handleKisToggle = async (row) => {
+    const password = window.prompt('KIS 계좌 토글 비밀번호를 입력하세요')
+    if (!password) return
+    try {
+      const updated = await updateKisKeyToggle(row.id, !row.enabled, password)
+      setKisKeys(asArray(updated))
+      setKisError('')
+    } catch (e) {
+      setKisError('비밀번호가 올바르지 않거나 서버 오류가 발생했습니다.')
+    }
+  }
 
   const formatStageValue = (stage) => {
     if (!stage) return '-'
@@ -787,6 +804,32 @@ function App() {
             ) : (
               <div className="empty">전략 정보를 불러오지 못했습니다.</div>
             )}
+          </div>
+
+          <div className="panel soft">
+            <div className="panel-title">KIS Accounts</div>
+            {kisError ? <div className="error-banner">{kisError}</div> : null}
+            <div className="kis-list">
+              {kisKeys.map((row) => (
+                <div key={row.id} className={`kis-row ${row.enabled ? 'on' : 'off'}`}>
+                  <div className="kis-main">
+                    <div className="kis-label">{row.label || `KIS${row.id}`}</div>
+                    <div className="kis-desc">{row.description || '설명 없음'}</div>
+                  </div>
+                  <div className="kis-meta">
+                    <span>{row.account_code ? `코드 ${row.account_code}` : '-'}</span>
+                    <span>{row.account_no_masked || '-'}</span>
+                  </div>
+                  <button
+                    className={`kis-toggle ${row.enabled ? 'on' : 'off'}`}
+                    onClick={() => handleKisToggle(row)}
+                  >
+                    {row.enabled ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+              ))}
+              {kisKeys.length === 0 && <div className="empty">등록된 계좌가 없습니다.</div>}
+            </div>
           </div>
 
           <div className="panel soft">
