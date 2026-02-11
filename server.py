@@ -292,9 +292,15 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
     buy_kospi = float(getattr(params, "buy_kospi", 0) or 0)
     buy_kosdaq = float(getattr(params, "buy_kosdaq", 0) or 0)
     max_positions = int(settings.get("trading", {}).get("max_positions") or getattr(params, "max_positions", 10))
+    max_per_sector = int(getattr(params, "max_per_sector", 0) or 0)
+    rank_mode = str(getattr(params, "rank_mode", "amount") or "amount").lower()
+    entry_mode = str(getattr(params, "entry_mode", "mean_reversion") or "mean_reversion").lower()
+    take_profit_ret = float(getattr(params, "take_profit_ret", 0) or 0)
     trend_filter = bool(getattr(params, "trend_ma25_rising", False))
+    initial_cash = float(getattr(params, "initial_cash", 0) or 0)
+    capital_utilization = float(getattr(params, "capital_utilization", 0) or 0)
 
-    universe = pd.read_sql_query("SELECT code, name, market FROM universe_members", conn)
+    universe = pd.read_sql_query("SELECT code, name, market, group_name FROM universe_members", conn)
     codes = universe["code"].dropna().astype(str).tolist()
     if not codes:
         data = {"date": None, "stages": [], "candidates": [], "summary": {"total": 0}}
@@ -310,7 +316,7 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
             FROM daily_price
             WHERE code IN ({placeholder})
         )
-        WHERE rn <= 2
+        WHERE rn <= 4
     """
     df = pd.read_sql_query(sql, conn, params=codes)
     if df.empty:
@@ -319,9 +325,9 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
         return data
 
     df = df.sort_values(["code", "date"])
-    last2 = df.groupby("code").tail(2).copy()
-    last2["ma25_prev"] = last2.groupby("code")["ma25"].shift(1)
-    latest = last2.groupby("code").tail(1).copy()
+    df["ma25_prev"] = df.groupby("code")["ma25"].shift(1)
+    df["ret3"] = df.groupby("code")["close"].pct_change(3)
+    latest = df.groupby("code").tail(1).copy()
     latest = latest.merge(universe, on="code", how="left")
 
     total = len(latest)
@@ -334,7 +340,11 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
         market = row.get("market") or "KOSPI"
         threshold = buy_kospi if "KOSPI" in market else buy_kosdaq
         try:
-            return float(row.get("disparity") or 0) <= threshold
+            disp = float(row.get("disparity") or 0)
+            if entry_mode == "trend_follow":
+                r3 = float(row.get("ret3") or 0)
+                return disp >= threshold and r3 >= 0
+            return disp <= threshold
         except Exception:
             return False
 
@@ -342,18 +352,49 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
     if trend_filter:
         stage_disp = stage_disp[stage_disp["ma25_prev"].notna() & (stage_disp["ma25"] > stage_disp["ma25_prev"])]
 
-    final = stage_disp.sort_values("amount", ascending=False).head(max_positions).copy()
+    stage_ranked = stage_disp.copy()
+    if rank_mode == "score":
+        if entry_mode == "trend_follow":
+            stage_ranked["score"] = (
+                (stage_ranked["disparity"].fillna(0).astype(float))
+                + (0.8 * (stage_ranked["ret3"].fillna(0).astype(float)))
+                + (0.05 * np.log1p(stage_ranked["amount"].fillna(0).astype(float).clip(lower=0)))
+            )
+        else:
+            stage_ranked["score"] = (
+                (-stage_ranked["disparity"].fillna(0).astype(float))
+                + (0.8 * (-stage_ranked["ret3"].fillna(0).astype(float)))
+                + (0.05 * np.log1p(stage_ranked["amount"].fillna(0).astype(float).clip(lower=0)))
+            )
+        stage_ranked = stage_ranked.sort_values("score", ascending=False)
+    else:
+        stage_ranked = stage_ranked.sort_values("amount", ascending=False)
+
+    final_rows = []
+    sector_counts: Dict[str, int] = {}
+    for _, row in stage_ranked.iterrows():
+        sec = row.get("group_name") or "UNKNOWN"
+        if max_per_sector and max_per_sector > 0:
+            if sector_counts.get(sec, 0) >= max_per_sector:
+                continue
+        final_rows.append(row)
+        sector_counts[sec] = sector_counts.get(sec, 0) + 1
+        if len(final_rows) >= max_positions:
+            break
+    final = pd.DataFrame(final_rows) if final_rows else stage_ranked.head(0).copy()
     final["rank"] = range(1, len(final) + 1) if not final.empty else []
 
     sector = pd.read_sql_query("SELECT code, sector_name, industry_name FROM sector_map", conn)
     final = final.merge(sector, on="code", how="left")
 
-    def _pack(df: pd.DataFrame, limit: int = 50) -> list[dict]:
+    def _pack(df: pd.DataFrame, limit: int = 50, sort_by: Optional[str] = None, ascending: bool = False) -> list[dict]:
         if df is None or df.empty:
             return []
+        if sort_by and sort_by in df.columns:
+            df = df.sort_values(sort_by, ascending=ascending)
         cols = [c for c in ["code", "name", "market", "amount", "close", "disparity"] if c in df.columns]
         out = df[cols].copy()
-        if "amount" in out.columns:
+        if sort_by is None and "amount" in out.columns:
             out = out.sort_values("amount", ascending=False)
         return out.head(limit).fillna("").to_dict(orient="records")
 
@@ -368,17 +409,43 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
         {"key": "final", "label": "Max Positions", "count": len(final), "value": max_positions},
     ]
 
+    order_value = settings.get("trading", {}).get("order_value")
+    budget_per_pos = None
+    budget_source = None
+    if order_value:
+        try:
+            budget_per_pos = float(order_value)
+            budget_source = "order_value"
+        except Exception:
+            budget_per_pos = None
+    if budget_per_pos is None and initial_cash > 0 and capital_utilization > 0 and max_positions > 0:
+        budget_per_pos = (initial_cash * capital_utilization) / max_positions
+        budget_source = "capital_utilization"
+
+    if budget_source == "capital_utilization":
+        qty_formula = "initial_cash * capital_utilization / max_positions / close"
+    else:
+        qty_formula = "order_value / close"
+
     pricing = {
         "price_source": "close",
-        "order_value": settings.get("trading", {}).get("order_value"),
-        "qty_formula": "order_value / close",
+        "entry_mode": entry_mode,
+        "order_value": order_value,
+        "budget_per_pos": budget_per_pos,
+        "budget_source": budget_source,
+        "qty_formula": qty_formula,
         "ord_dvsn": settings.get("trading", {}).get("ord_dvsn"),
         "buy_thresholds": {"kospi": buy_kospi, "kosdaq": buy_kosdaq},
         "sell_rules": {
             "take_profit_disparity": getattr(params, "sell_disparity", None),
+            "take_profit_ret": take_profit_ret,
             "stop_loss": getattr(params, "stop_loss", None),
             "max_holding_days": getattr(params, "max_holding_days", None),
         },
+        "rank_mode": rank_mode,
+        "max_per_sector": max_per_sector,
+        "capital_utilization": capital_utilization,
+        "initial_cash": initial_cash,
     }
 
     data = {
@@ -392,12 +459,16 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
             "min_amount": _pack(stage_min),
             "liquidity": _pack(stage_liq),
             "disparity": _pack(stage_disp),
-            "final": _pack(final),
+            "final": _pack(final, sort_by="rank", ascending=True),
         },
         "summary": {
             "total": total,
             "final": len(final),
             "trend_filter": trend_filter,
+            "rank_mode": rank_mode,
+            "entry_mode": entry_mode,
+            "max_positions": max_positions,
+            "max_per_sector": max_per_sector,
         },
         "pricing": pricing,
     }
@@ -741,16 +812,25 @@ def engines():
 @app.get('/strategy')
 def strategy():
     settings = load_settings()
-    strat = settings.get("strategy", {})
+    params = load_strategy(settings)
     trading = settings.get("trading", {})
     return jsonify({
-        "liquidity_rank": strat.get("liquidity_rank"),
-        "min_amount": strat.get("min_amount"),
-        "disparity_buy_kospi": strat.get("disparity_buy_kospi"),
-        "disparity_buy_kosdaq": strat.get("disparity_buy_kosdaq"),
-        "disparity_sell": strat.get("disparity_sell"),
-        "stop_loss": strat.get("stop_loss"),
-        "max_holding_days": strat.get("max_holding_days"),
+        "entry_mode": params.entry_mode,
+        "liquidity_rank": params.liquidity_rank,
+        "min_amount": params.min_amount,
+        "rank_mode": params.rank_mode,
+        "disparity_buy_kospi": params.buy_kospi,
+        "disparity_buy_kosdaq": params.buy_kosdaq,
+        "disparity_sell": params.sell_disparity,
+        "take_profit_ret": params.take_profit_ret,
+        "stop_loss": params.stop_loss,
+        "max_holding_days": params.max_holding_days,
+        "max_positions": params.max_positions,
+        "max_per_sector": params.max_per_sector,
+        "initial_cash": params.initial_cash,
+        "capital_utilization": params.capital_utilization,
+        "trend_ma25_rising": params.trend_ma25_rising,
+        "selection_horizon_days": params.selection_horizon_days,
         "order_value": trading.get("order_value"),
         "ord_dvsn": trading.get("ord_dvsn")
     })

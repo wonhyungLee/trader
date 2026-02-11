@@ -451,12 +451,28 @@ function App() {
                     <strong>{formatCurrency(selectionPricing.order_value)}</strong>
                   </div>
                   <div>
+                    <span>Budget / Pos</span>
+                    <strong>{formatCurrency(selectionPricing.budget_per_pos)}</strong>
+                  </div>
+                  <div>
                     <span>Qty Formula</span>
                     <strong>{selectionPricing.qty_formula || 'order_value / close'}</strong>
                   </div>
                   <div>
                     <span>Order Type</span>
                     <strong>{selectionPricing.ord_dvsn || '-'}</strong>
+                  </div>
+                  <div>
+                    <span>Rank Mode</span>
+                    <strong>{(selectionPricing.rank_mode || 'amount').toUpperCase()}</strong>
+                  </div>
+                  <div>
+                    <span>Sector Cap</span>
+                    <strong>{selectionPricing.max_per_sector || 0}</strong>
+                  </div>
+                  <div>
+                    <span>Trend Filter</span>
+                    <strong>{selection?.summary?.trend_filter ? 'ON' : 'OFF'}</strong>
                   </div>
                   <div>
                     <span>Sell Take Profit</span>
@@ -753,10 +769,18 @@ function App() {
             <div className="panel-title">Strategy</div>
             {strategy ? (
               <div className="strategy-grid">
+                <div><span>Liquidity Rank</span><strong>{strategy.liquidity_rank}</strong></div>
+                <div><span>Min Amount</span><strong>{formatCurrency(strategy.min_amount)}</strong></div>
+                <div><span>Rank Mode</span><strong>{(strategy.rank_mode || 'amount').toUpperCase()}</strong></div>
+                <div><span>Max Positions</span><strong>{strategy.max_positions}</strong></div>
+                <div><span>Sector Cap</span><strong>{strategy.max_per_sector}</strong></div>
+                <div><span>Trend MA25</span><strong>{strategy.trend_ma25_rising ? 'ON' : 'OFF'}</strong></div>
                 <div><span>Disparity KOSPI</span><strong>{strategy.disparity_buy_kospi}</strong></div>
                 <div><span>Disparity KOSDAQ</span><strong>{strategy.disparity_buy_kosdaq}</strong></div>
                 <div><span>Disparity Sell</span><strong>{strategy.disparity_sell}</strong></div>
                 <div><span>Stop Loss</span><strong>{strategy.stop_loss}</strong></div>
+                <div><span>Initial Cash</span><strong>{formatCurrency(strategy.initial_cash)}</strong></div>
+                <div><span>Capital Util</span><strong>{formatPct((strategy.capital_utilization || 0) * 100)}</strong></div>
                 <div><span>Order Value</span><strong>{formatCurrency(strategy.order_value)}</strong></div>
                 <div><span>Max Holding</span><strong>{strategy.max_holding_days}</strong></div>
               </div>

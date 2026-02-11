@@ -26,9 +26,13 @@ class SubscriptionManager:
     def _score(self, code: str, price: float, amount: float) -> float:
         base = self.baseline.get(code) or {}
         ma25 = _to_float(base.get("ma25"))
-        if ma25 <= 0 or price <= 0:
+        # Use previous close as baseline for selection when available.
+        base_price = _to_float(base.get("close")) if base.get("close") is not None else 0.0
+        if base_price <= 0:
+            base_price = price
+        if ma25 <= 0 or base_price <= 0:
             return 0.0
-        disparity = (price / ma25) - 1
+        disparity = (base_price / ma25) - 1
         distance = abs(disparity - self.threshold)
         score = 1.0 / (distance + 1e-6)
         # mild liquidity weight
