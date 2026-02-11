@@ -7,4 +7,5 @@ tqdm
 finance-datareader
 python-dateutil
 flask
+flask-cors
 websockets
