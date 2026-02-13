@@ -112,12 +112,14 @@ function App() {
   const [filterToggles, setFilterToggles] = useState({ min_amount: true, liquidity: true, disparity: true })
   const [filterError, setFilterError] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
+  const [stockDrawerOpen, setStockDrawerOpen] = useState(false)
   const [zoomRange, setZoomRange] = useState({ start: 0, end: 0 })
   const [zoomArmed, setZoomArmed] = useState(false)
   const [sectorOverrideValue, setSectorOverrideValue] = useState('')
   const [sectorOverrideSaving, setSectorOverrideSaving] = useState(false)
   const [sectorOverrideError, setSectorOverrideError] = useState('')
   const chartWheelRef = useRef(null)
+  const stockSearchRef = useRef(null)
   const analysisTimerRef = useRef(null)
   const analysisDelayTimerRef = useRef(null)
   const analysisReadyRef = useRef(false)
@@ -159,6 +161,22 @@ function App() {
     const id = setInterval(() => loadData(), 30000)
     return () => clearInterval(id)
   }, [])
+
+  useEffect(() => {
+    const locked = modalOpen || stockDrawerOpen
+    document.body.style.overflow = locked ? 'hidden' : ''
+    return () => {
+      document.body.style.overflow = ''
+    }
+  }, [modalOpen, stockDrawerOpen])
+
+  useEffect(() => {
+    if (!stockDrawerOpen) return
+    const id = setTimeout(() => {
+      stockSearchRef.current?.focus?.()
+    }, 0)
+    return () => clearTimeout(id)
+  }, [stockDrawerOpen])
 
   useEffect(() => {
     if (!selected || !modalOpen) return
@@ -252,14 +270,15 @@ function App() {
   useEffect(() => {
     setSectorFilter('ALL')
     setSelected(null)
+    setStockDrawerOpen(false)
   }, [filter])
 
   useEffect(() => {
     setSelected(null)
+    setStockDrawerOpen(false)
   }, [sectorFilter])
 
   useEffect(() => {
-    document.body.style.overflow = modalOpen ? 'hidden' : ''
     if (!modalOpen) {
       setCurrentPrice(null)
       setCurrentPriceLoading(false)
@@ -274,9 +293,6 @@ function App() {
         clearInterval(analysisTimerRef.current)
         analysisTimerRef.current = null
       }
-    }
-    return () => {
-      document.body.style.overflow = ''
     }
   }, [modalOpen])
 
@@ -435,6 +451,7 @@ function App() {
     if (!row?.code) return
     const code = String(row.code).toUpperCase()
     const base = universeByCode.get(code) || {}
+    setStockDrawerOpen(false)
     setSelected({
       ...base,
       ...row,
@@ -588,7 +605,7 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${modalOpen ? 'modal-open' : ''} ${stockDrawerOpen ? 'drawer-open' : ''}`}>
       <header className="topbar">
         <div className="brand">
           <span className="brand-kicker">US MARKET VIEW</span>
@@ -626,16 +643,34 @@ function App() {
         </div>
       </header>
 
+      {stockDrawerOpen ? (
+        <button
+          type="button"
+          className="drawer-backdrop"
+          onClick={() => setStockDrawerOpen(false)}
+          aria-label="주식목록 닫기"
+        />
+      ) : null}
+
       <main className="layout">
-        <aside id="stocks" className="panel stock-panel">
+        <aside id="stocks" className={`panel stock-panel ${stockDrawerOpen ? 'mobile-open' : ''}`}>
           <div className="panel-head">
             <div>
               <h2>주식목록</h2>
               <p>{filtered.length} 종목</p>
             </div>
+            <button
+              type="button"
+              className="drawer-close"
+              onClick={() => setStockDrawerOpen(false)}
+              aria-label="주식목록 닫기"
+            >
+              닫기
+            </button>
           </div>
           <div className="search">
             <input
+              ref={stockSearchRef}
               placeholder="코드/종목명/섹터 검색"
               value={search}
               onChange={e => setSearch(e.target.value)}
@@ -755,13 +790,13 @@ function App() {
               <div id="final" className="final-board">
                 <div className="final-head">
                   <div>
-                    <div className="filter-tag">최종 후보</div>
+                    <div className="filter-tag">매수 후보</div>
                     <div className="filter-title-row">
-                      <div className="final-title">최종 후보</div>
+                      <div className="final-title">매수 후보</div>
                       <button
                         type="button"
                         className="help-icon"
-                        aria-label="최종 후보 설명"
+                        aria-label="매수 후보 설명"
                         aria-expanded={openHelp === 'final'}
                         onClick={() => toggleHelp('final')}
                       >
@@ -774,6 +809,12 @@ function App() {
                     <div className="filter-criteria">{finalStage.criteria}</div>
                   </div>
                   <div className="filter-count">{finalCount}</div>
+                </div>
+                <div className="final-guidance">
+                  <div className="final-guidance-copy">6개월 정도의 기간에서 수익 실현을 권장합니다.</div>
+                  <div className="final-guidance-returns">
+                    기대수익률- 5일 0.38% / 10일 0.76% / 1개월 1.65% / 3개월 5.1% / 6개월 10.03% / 12개월 20%
+                  </div>
                 </div>
                 <div className="result-table">
                   <div className="result-row head">
@@ -808,13 +849,38 @@ function App() {
                       <span>{row.market || '-'}</span>
                     </div>
                   ))}
-                  {finalCandidates.length === 0 && <div className="empty">최종 후보가 없습니다.</div>}
+                  {finalCandidates.length === 0 && <div className="empty">매수 후보가 없습니다.</div>}
                 </div>
               </div>
             ) : null}
           </section>
         </section>
       </main>
+
+      <div className="mobile-actionbar" aria-label="모바일 빠른 메뉴">
+        <button
+          type="button"
+          className="mobile-action"
+          onClick={() => setStockDrawerOpen(true)}
+        >
+          주식목록 ({filtered.length})
+        </button>
+        <button
+          type="button"
+          className="mobile-action"
+          onClick={() => loadData()}
+        >
+          새로고침
+        </button>
+        <a
+          className="mobile-action"
+          href="https://discord.gg/xHtvSRZG3"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          디스코드
+        </a>
+      </div>
 
       {selected && modalOpen ? (
         <div className="modal-overlay" onClick={(e) => {
