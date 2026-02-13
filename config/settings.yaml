@@ -1,6 +1,7 @@
 # BNF Viewer (US) 설정
 
 env: "viewer"
+site_url: "http://trader.p-e.kr"
 
 database:
   path: "data/market_data.db"

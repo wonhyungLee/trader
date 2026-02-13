@@ -572,6 +572,7 @@ function App() {
           <span className="brand-kicker">US MARKET VIEW</span>
           <h1 className="brand-title">BNF US Trade Studio</h1>
           <p className="brand-sub">NASDAQ100 + S&amp;P500 데이터 기반의 시각화 대시보드입니다.</p>
+          <p className="brand-note">보유 권장 기간은 6개월입니다.</p>
         </div>
         <div className="controls">
           <div className="segmented">
@@ -590,6 +591,14 @@ function App() {
               ))}
             </select>
           </div>
+          <a
+            className="discord-btn"
+            href="https://discord.gg/xHtvSRZG3"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            디스코드 알람받기
+          </a>
           <button className="primary-btn" onClick={() => loadData()}>Refresh</button>
           <div className="refresh-meta">최근 업데이트 {refreshLabel}</div>
         </div>
