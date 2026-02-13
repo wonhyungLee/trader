@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -15,7 +16,10 @@ from src.utils.config import load_settings
 from src.utils.notifier import maybe_notify
 from src.utils.project_root import ensure_repo_root
 
-
+# NOTE:
+# This repo is the US "viewer" app. Historical KR-only "accuracy" refill tables
+# existed in older projects, but they do not apply to US tickers and can create
+# infinite refill loops. Keep the feature behind a flag (default: off).
 ACCURACY_TABLES = {
     "investor_flow_daily": "inv",
     "program_trade_daily": "prog",
@@ -84,6 +88,19 @@ def _missing_codes_for_date(conn: sqlite3.Connection, table: str, date: str) -> 
     return [r[0] for r in rows]
 
 
+def _missing_codes_any(conn: sqlite3.Connection, table: str) -> List[str]:
+    """Codes that have zero rows in `table`."""
+    sql = (
+        f"SELECT u.code "
+        f"FROM universe_members u "
+        f"LEFT JOIN (SELECT DISTINCT code FROM {table}) t ON u.code=t.code "
+        f"WHERE t.code IS NULL "
+        f"ORDER BY u.code"
+    )
+    rows = conn.execute(sql).fetchall()
+    return [r[0] for r in rows]
+
+
 def _write_codes_csv(path: Path, codes: List[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
@@ -131,7 +148,7 @@ def _run_accuracy_refill(
     return res.returncode
 
 
-def _run_daily_refill(chunk_days: int, limit: Optional[int] = None):
+def _run_daily_refill(chunk_days: int, limit: Optional[int] = None, codes_file: Optional[str] = None):
     cmd = [
         sys.executable,
         "-m",
@@ -139,6 +156,8 @@ def _run_daily_refill(chunk_days: int, limit: Optional[int] = None):
         "--chunk-days",
         str(chunk_days),
     ]
+    if codes_file:
+        cmd.extend(["--codes-file", str(codes_file)])
     if limit is not None and int(limit) > 0:
         cmd.extend(["--limit", str(int(limit))])
     logging.info("Running daily refill: %s", " ".join(cmd))
@@ -152,6 +171,7 @@ def _load_cfg(settings: dict, args) -> Dict[str, object]:
         return wd.get(name, default)
 
     interval = float(args.interval if args.interval is not None else _get("interval_sec", 1800))
+    accuracy_enabled = bool(_get("accuracy_enabled", False))
     cooldown = float(args.cooldown if args.cooldown is not None else _get("accuracy_cooldown_sec", 21600))
     min_missing = int(args.min_missing if args.min_missing is not None else _get("accuracy_min_missing", 1))
     daily_min_missing = int(args.daily_min_missing if args.daily_min_missing is not None else _get("daily_min_missing", 1))
@@ -172,14 +192,16 @@ def _load_cfg(settings: dict, args) -> Dict[str, object]:
         rate_sleep = float(rate_sleep)
 
     progress_file = Path(args.progress_file or _get("accuracy_progress_file", "data/accuracy_progress_watchdog.json"))
-    codes_file = Path(args.codes_file or _get("accuracy_codes_file", "data/csv/accuracy_missing_codes.csv"))
+    codes_file = Path(args.codes_file or _get("daily_codes_file", "data/csv/daily_missing_codes.csv"))
     accuracy_lock = Path(args.accuracy_lock_file or _get("accuracy_lock_file", "data/accuracy_loader.lock"))
     daily_lock = Path(args.daily_lock_file or _get("daily_lock_file", "data/daily_loader.lock"))
+    refill_lock = Path(args.refill_lock_file or _get("refill_lock_file", "data/locks/refill_loader.lock"))
     lock_file = Path(args.lock_file or _get("lock_file", "data/watchdog.lock"))
     state_file = Path(args.state_file or "data/watchdog_state.json")
 
     return {
         "interval": interval,
+        "accuracy_enabled": accuracy_enabled,
         "cooldown": cooldown,
         "min_missing": min_missing,
         "daily_min_missing": daily_min_missing,
@@ -194,6 +216,7 @@ def _load_cfg(settings: dict, args) -> Dict[str, object]:
         "codes_file": codes_file,
         "accuracy_lock_file": accuracy_lock,
         "daily_lock_file": daily_lock,
+        "refill_lock_file": refill_lock,
         "lock_file": lock_file,
         "state_file": state_file,
         "limit": args.limit,
@@ -205,121 +228,98 @@ def _load_cfg(settings: dict, args) -> Dict[str, object]:
 def run_once(settings: dict, cfg: Dict[str, object]) -> None:
     conn = sqlite3.connect("data/market_data.db")
     conn.row_factory = sqlite3.Row
-
-    last_date = _get_last_price_date(conn)
-    if not last_date:
-        maybe_notify(settings, "[watchdog] no daily_price date found; skip")
-        return
-
-    # missing on last date
-    missing_map: Dict[str, int] = {}
-    missing_union: List[str] = []
-    missing_set = set()
-
-    for table, label in ACCURACY_TABLES.items():
-        try:
-            miss = _missing_codes_for_date(conn, table, last_date)
-        except sqlite3.OperationalError:
-            miss = []
-        missing_map[label] = len(miss)
-        for c in miss:
-            if c not in missing_set:
-                missing_set.add(c)
-                missing_union.append(c)
-
-    # daily_price missing for last_date (informational)
     try:
-        miss_daily = _missing_codes_for_date(conn, "daily_price", last_date)
-        daily_missing_count = len(miss_daily)
-    except sqlite3.OperationalError:
-        daily_missing_count = 0
+        last_date = _get_last_price_date(conn)
+        if not last_date:
+            maybe_notify(settings, "[watchdog] no daily_price date found; skip")
+            return
 
-    msg = (
-        f"[watchdog] date={last_date} daily_missing={daily_missing_count} "
-        f"inv={missing_map.get('inv', 0)} prog={missing_map.get('prog', 0)} "
-        f"short={missing_map.get('short', 0)} credit={missing_map.get('credit', 0)} "
-        f"loan={missing_map.get('loan', 0)} vi={missing_map.get('vi', 0)} "
-        f"union={len(missing_union)}"
-    )
-    maybe_notify(settings, msg)
+        # daily_price missing for last_date
+        try:
+            miss_daily = _missing_codes_for_date(conn, "daily_price", last_date)
+            daily_missing_count = len(miss_daily)
+        except sqlite3.OperationalError:
+            miss_daily = []
+            daily_missing_count = 0
 
-    if cfg["no_refill"]:
-        return
+        # daily_price missing entirely (bootstrap targets)
+        try:
+            miss_any = _missing_codes_any(conn, "daily_price")
+        except sqlite3.OperationalError:
+            miss_any = []
 
-    state_path: Path = cfg["state_file"]
-    state = _read_state(state_path)
+        targets: List[str] = []
+        seen = set()
+        for c in (miss_any + miss_daily):
+            if c and c not in seen:
+                seen.add(c)
+                targets.append(c)
 
-    # Daily refill (fill missing daily_price)
-    if cfg["daily_enabled"] and daily_missing_count >= int(cfg["daily_min_missing"]):
-        daily_lock_path: Path = cfg["daily_lock_file"]
-        if _lock_active(daily_lock_path):
-            maybe_notify(settings, "[watchdog] daily loader already running; skip")
-        else:
-            last_daily_ts = float(state.get("last_daily_run_ts", 0) or 0)
-            cooldown = float(cfg["daily_cooldown"])
-            now = time.time()
-            if cooldown > 0 and (now - last_daily_ts) < cooldown:
-                remain = int(cooldown - (now - last_daily_ts))
-                maybe_notify(settings, f"[watchdog] daily cooldown active; skip ({remain}s left)")
+        msg = f"[watchdog] date={last_date} missing_latest={daily_missing_count} missing_any={len(miss_any)} targets={len(targets)}"
+        maybe_notify(settings, msg)
+
+        # Persist the latest observed health snapshot even when no refill is triggered.
+        state_path: Path = cfg["state_file"]
+        state = _read_state(state_path)
+        state["last_check_ts"] = time.time()
+        state["last_check_at"] = datetime.utcnow().isoformat()
+        state["last_check_date"] = last_date
+        state["missing_latest"] = daily_missing_count
+        state["missing_any"] = len(miss_any)
+        state["targets"] = len(targets)
+        _write_state(state_path, state)
+
+        if cfg["no_refill"]:
+            return
+
+        # Daily refill (fill missing daily_price)
+        if cfg["daily_enabled"] and (len(targets) >= int(cfg["daily_min_missing"]) or len(miss_any) > 0):
+            refill_lock_path: Path = cfg["refill_lock_file"]
+            if _lock_active(refill_lock_path):
+                logging.info("Refill lock active (%s); skipping daily refill.", refill_lock_path)
+                return
+            daily_lock_path: Path = cfg["daily_lock_file"]
+            if _lock_active(daily_lock_path):
+                maybe_notify(settings, "[watchdog] daily loader already running; skip")
             else:
-                daily_lock_path.parent.mkdir(parents=True, exist_ok=True)
-                daily_lock_path.write_text(str(os.getpid()), encoding="utf-8")
-                try:
-                    maybe_notify(settings, f"[watchdog] daily refill start missing={daily_missing_count} date={last_date}")
-                    rc = _run_daily_refill(int(cfg["daily_chunk_days"]), cfg["daily_limit"])
-                    state["last_daily_run_ts"] = time.time()
-                    state["last_daily_date"] = last_date
-                    state["last_daily_missing"] = daily_missing_count
-                    state["last_daily_rc"] = rc
-                    if cfg["daily_limit"] is not None:
-                        state["last_daily_limit"] = int(cfg["daily_limit"])
-                    _write_state(state_path, state)
-                    if rc != 0:
-                        maybe_notify(settings, f"[watchdog] daily refill exited rc={rc}")
-                finally:
+                last_daily_ts = float(state.get("last_daily_run_ts", 0) or 0)
+                cooldown = float(cfg["daily_cooldown"])
+                now = time.time()
+                if cooldown > 0 and (now - last_daily_ts) < cooldown:
+                    remain = int(cooldown - (now - last_daily_ts))
+                    maybe_notify(settings, f"[watchdog] daily cooldown active; skip ({remain}s left)")
+                else:
+                    daily_lock_path.parent.mkdir(parents=True, exist_ok=True)
+                    daily_lock_path.write_text(str(os.getpid()), encoding="utf-8")
                     try:
-                        daily_lock_path.unlink()
-                    except Exception:
-                        pass
+                        codes_file: Path = cfg["codes_file"]
+                        _write_codes_csv(codes_file, targets)
+                        maybe_notify(settings, f"[watchdog] daily refill start targets={len(targets)} date={last_date}")
+                        rc = _run_daily_refill(int(cfg["daily_chunk_days"]), cfg["daily_limit"], codes_file=str(codes_file))
+                        state["last_daily_run_ts"] = time.time()
+                        state["last_daily_date"] = last_date
+                        state["last_daily_missing"] = daily_missing_count
+                        state["last_daily_missing_any"] = len(miss_any)
+                        state["last_daily_targets"] = len(targets)
+                        state["last_daily_rc"] = rc
+                        if cfg["daily_limit"] is not None:
+                            state["last_daily_limit"] = int(cfg["daily_limit"])
+                        _write_state(state_path, state)
+                        if rc != 0:
+                            maybe_notify(settings, f"[watchdog] daily refill exited rc={rc}")
+                    finally:
+                        try:
+                            daily_lock_path.unlink()
+                        except Exception:
+                            pass
 
-    if len(missing_union) < int(cfg["min_missing"]):
-        return
-
-    lock_path: Path = cfg["accuracy_lock_file"]
-    if _lock_active(lock_path):
-        maybe_notify(settings, "[watchdog] accuracy loader already running; skip")
-        return
-
-    last_run_ts = float(state.get("last_accuracy_run_ts", 0) or 0)
-    cooldown = float(cfg["cooldown"])
-    now = time.time()
-    if cooldown > 0 and (now - last_run_ts) < cooldown:
-        remain = int(cooldown - (now - last_run_ts))
-        maybe_notify(settings, f"[watchdog] accuracy cooldown active; skip ({remain}s left)")
-        return
-
-    codes_file: Path = cfg["codes_file"]
-    _write_codes_csv(codes_file, missing_union)
-
-    maybe_notify(settings, f"[watchdog] accuracy refill start codes={len(missing_union)} date={last_date}")
-
-    rc = _run_accuracy_refill(
-        date=last_date,
-        codes_file=codes_file,
-        progress_file=cfg["progress_file"],
-        lock_file=cfg["accuracy_lock_file"],
-        notify_every=int(cfg["notify_every"]),
-        item_sleep=float(cfg["item_sleep"]),
-        rate_sleep=cfg["rate_sleep"],
-        limit=cfg["limit"],
-    )
-    state["last_accuracy_run_ts"] = time.time()
-    state["last_accuracy_date"] = last_date
-    state["last_accuracy_missing"] = len(missing_union)
-    state["last_accuracy_rc"] = rc
-    _write_state(state_path, state)
-    if rc != 0:
-        maybe_notify(settings, f"[watchdog] accuracy refill exited rc={rc}")
+        # accuracy refill is intentionally disabled in trader-US.
+        # (The legacy "accuracy_*" tables are KR-only and do not apply to US tickers.)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def main():
@@ -334,6 +334,7 @@ def main():
     parser.add_argument("--daily-chunk-days", type=int, default=None, help="daily loader chunk days")
     parser.add_argument("--daily-limit", type=int, default=None, help="daily loader max code count per run")
     parser.add_argument("--daily-lock-file", type=str, default=None, help="daily loader lock file")
+    parser.add_argument("--refill-lock-file", type=str, default=None, help="refill loader lock file (skip daily refill when active)")
     parser.add_argument("--notify-every", type=int, default=None, help="notify every n codes during refill")
     parser.add_argument("--item-sleep", type=float, default=None, help="sleep seconds per code during refill")
     parser.add_argument("--rate-sleep", type=float, default=None, help="override broker rate sleep for refill")

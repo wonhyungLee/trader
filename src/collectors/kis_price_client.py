@@ -19,6 +19,12 @@ class KISPriceClient:
         self.base_url = self.kis.get("base_url_prod" if env == "prod" else "base_url_paper")
         # self.rate_sleep is no longer needed; KISBroker handles it.
 
+    @staticmethod
+    def _normalize_symbol(symbol: str) -> str:
+        # KIS overseas endpoints and master use slash for class shares (e.g., BRK/B, BF/B).
+        # Our universe uses dot (BRK.B) for UI compatibility, so normalize here.
+        return str(symbol or "").strip().upper().replace(".", "/")
+
     def _tr_id(self) -> str:
         # 국내주식 기간별 시세(일/주/월/년) TR
         return "FHKST03010100"
@@ -52,7 +58,7 @@ class KISPriceClient:
         params = {
             "AUTH": "",
             "EXCD": excd,
-            "SYMB": symbol,
+            "SYMB": self._normalize_symbol(symbol),
             "GUBN": gubn,
             "BYMD": bymd,
             "MODP": modp,
@@ -67,6 +73,6 @@ class KISPriceClient:
         url = f"{self.base_url}/uapi/overseas-price/v1/quotations/search-info"
         params = {
             "PRDT_TYPE_CD": prdt_type_cd,
-            "PDNO": symbol,
+            "PDNO": self._normalize_symbol(symbol),
         }
         return self.broker.request(tr_id, url, params=params)

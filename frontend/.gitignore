@@ -9,6 +9,9 @@ lerna-debug.log*
 
 node_modules
 dist
+# dist is deployed from this repo (keep tracked)
+!dist/
+!dist/**
 dist-ssr
 *.local
 

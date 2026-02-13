@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Trader-US Daily Full History Refill (Missing Only)
+
+[Timer]
+# Run in daytime Korea time.
+OnCalendar=*-*-* 09:00:00 Asia/Seoul
+Persistent=true
+
+[Install]
+WantedBy=timers.target

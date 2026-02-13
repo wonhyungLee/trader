@@ -14,12 +14,16 @@ report.png
 venv*/
 node_modules/
 dist/
+# Frontend build output is deployed from the repo (keep tracked)
+!frontend/dist/
+!frontend/dist/**
 .DS_Store
 개인정보
 .venv/
 myenv/
 data/*.lock
 data/*.json
+data/locks/
 
 # Generated data exports / caches (keep out of git)
 data/csv/

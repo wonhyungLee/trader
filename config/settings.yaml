@@ -18,7 +18,8 @@ kis:
   token_cache_path: ".cache/kis_token.json"
   rate_limit_sleep_sec: 0.1
   rate_limiter_total_tps: 10
-  rate_limiter_max_tokens: 10
+  # Smooth bursts to reduce EGW00201 (per-second) errors while keeping ~10 TPS average.
+  rate_limiter_max_tokens: 2
   rate_limiter_trading_reserve: 1
   timeout_connect_sec: 5
   timeout_read_sec: 20
@@ -39,7 +40,6 @@ export_csv:
   tables:
     - "universe_members"
     - "sector_map"
-    - "daily_price"
     - "refill_progress"
     - "job_runs"
     - "ovrs_stock_info"
@@ -78,12 +78,13 @@ strategy:
 # DB 감시/증분수집 (서버 백그라운드 watchdog)
 watchdog:
   enabled: true
+  accuracy_enabled: false
   interval_sec: 900
-  daily_min_missing: 20
-  daily_limit: 20
+  daily_min_missing: 1
+  daily_limit: 0
   daily_stale_days: 1
   daily_chunk_days: 90
-  daily_cooldown_sec: 10800
+  daily_cooldown_sec: 1800
   refill_chunk_days: 150
   refill_sleep_sec: 0.1
   refill_max_missing_per_cycle: 1

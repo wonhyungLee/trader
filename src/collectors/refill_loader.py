@@ -210,6 +210,17 @@ def fetch_prices_kis_overseas(client: KISPriceClient, excd: str, symbol: str, en
     return _parse_overseas_daily(res)
 
 
+def _unique_excds(items: Iterable[object]) -> List[str]:
+    out: List[str] = []
+    for it in items:
+        s = str(it or "").strip().upper()
+        if not s:
+            continue
+        if s not in out:
+            out.append(s)
+    return out
+
+
 def backward_refill(
     store: SQLiteStore,
     code: str,
@@ -227,6 +238,11 @@ def backward_refill(
     today = datetime.today().date()
     current_end = datetime.strptime(resume_end, "%Y-%m-%d").date() if resume_end else today
     min_date_dt = datetime.strptime(min_date, "%Y-%m-%d").date() if min_date else None
+
+    # KIS overseas dailyprice returns empty payloads depending on EXCD (KIS internal mapping).
+    # Use fallback attempts when the primary EXCD returns no rows.
+    excd_candidates = _unique_excds([excd, "NAS", "NYS", "AMS"])
+    active_excd = excd_candidates[0] if excd_candidates else str(excd or "").strip().upper()
     
     empty_cnt = 0
     last_min_date: Optional[str] = None
@@ -244,7 +260,7 @@ def backward_refill(
         try:
             df = fetch_prices_kis_overseas(
                 kis_client,
-                excd,
+                active_excd,
                 code,
                 current_end.strftime("%Y-%m-%d"),
             )  # type: ignore
@@ -267,6 +283,26 @@ def backward_refill(
             if empty_cnt >= empty_limit:
                 break
             continue
+
+        # Empty payload with one EXCD can still be valid under another EXCD.
+        if df.empty and kis_client is not None and len(excd_candidates) > 1:
+            for cand in excd_candidates:
+                if cand == active_excd:
+                    continue
+                try:
+                    df2 = fetch_prices_kis_overseas(
+                        kis_client,
+                        cand,
+                        code,
+                        current_end.strftime("%Y-%m-%d"),
+                    )  # type: ignore
+                except Exception:
+                    continue
+                if not df2.empty:
+                    active_excd = cand
+                    df = df2
+                    print(f"[{code}] EXCD fallback -> {active_excd}")
+                    break
 
         reached_min_date = False
         if df.empty:

@@ -1,0 +1,13 @@
+[Unit]
+Description=Trader-US Daily Full History Refill (Missing Only)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trader-US
+Environment=PYTHONUNBUFFERED=1
+TimeoutStartSec=0
+ExecStart=/home/ubuntu/trader-US/scripts/daily_refill.sh
+

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import List
 
@@ -107,7 +108,13 @@ def maybe_notify(settings: dict, message: str) -> None:
         dc_webhook = ""
 
     dc_success = False
-    if dc.get("enabled") and dc_webhook:
+    env_enabled = os.getenv("DISCORD_NOTIFY_ENABLED")
+    if env_enabled is None:
+        enabled = bool(dc.get("enabled"))
+    else:
+        enabled = str(env_enabled).strip().lower() not in {"0", "false", "no"}
+
+    if enabled and dc_webhook:
         dc_success = True
         for chunk in _chunk_message(message, DISCORD_SAFE_LEN):
             if not _send_discord(dc_webhook, chunk):

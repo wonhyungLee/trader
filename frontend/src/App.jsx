@@ -8,6 +8,7 @@ import {
   updateSelectionFilterToggle,
   overrideSector
 } from './api'
+import CoupangBanner from './CoupangBanner'
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -51,7 +52,7 @@ const formatCurrency = (value) => {
       currency: 'USD',
       maximumFractionDigits: 2
     }).format(num)
-  } catch (e) {
+  } catch {
     return `$${formatNumber(num)}`
   }
 }
@@ -112,14 +113,12 @@ function App() {
   const [filterToggles, setFilterToggles] = useState({ min_amount: true, liquidity: true, disparity: true })
   const [filterError, setFilterError] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
-  const [stockDrawerOpen, setStockDrawerOpen] = useState(false)
   const [zoomRange, setZoomRange] = useState({ start: 0, end: 0 })
   const [zoomArmed, setZoomArmed] = useState(false)
   const [sectorOverrideValue, setSectorOverrideValue] = useState('')
   const [sectorOverrideSaving, setSectorOverrideSaving] = useState(false)
   const [sectorOverrideError, setSectorOverrideError] = useState('')
   const chartWheelRef = useRef(null)
-  const stockSearchRef = useRef(null)
   const analysisTimerRef = useRef(null)
   const analysisDelayTimerRef = useRef(null)
   const analysisReadyRef = useRef(false)
@@ -163,20 +162,12 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const locked = modalOpen || stockDrawerOpen
+    const locked = modalOpen
     document.body.style.overflow = locked ? 'hidden' : ''
     return () => {
       document.body.style.overflow = ''
     }
-  }, [modalOpen, stockDrawerOpen])
-
-  useEffect(() => {
-    if (!stockDrawerOpen) return
-    const id = setTimeout(() => {
-      stockSearchRef.current?.focus?.()
-    }, 0)
-    return () => clearTimeout(id)
-  }, [stockDrawerOpen])
+  }, [modalOpen])
 
   useEffect(() => {
     if (!selected || !modalOpen) return
@@ -246,9 +237,11 @@ function App() {
   useEffect(() => {
     if (!selected || !modalOpen) return
     let mounted = true
+    const code = selected?.code
+    if (!code) return
     const loadCurrentPrice = () => {
       setCurrentPriceLoading(true)
-      fetchCurrentPrice(selected.code)
+      fetchCurrentPrice(code)
         .then((data) => {
           if (mounted) setCurrentPrice(data && typeof data === 'object' ? data : null)
         })
@@ -265,17 +258,15 @@ function App() {
       mounted = false
       clearInterval(id)
     }
-  }, [selected?.code, modalOpen])
+  }, [selected, modalOpen])
 
   useEffect(() => {
     setSectorFilter('ALL')
     setSelected(null)
-    setStockDrawerOpen(false)
   }, [filter])
 
   useEffect(() => {
     setSelected(null)
-    setStockDrawerOpen(false)
   }, [sectorFilter])
 
   useEffect(() => {
@@ -412,7 +403,7 @@ function App() {
       })
       setFilterError('')
       loadData()
-    } catch (e) {
+    } catch {
       setFilterError('비밀번호가 올바르지 않거나 서버 오류가 발생했습니다.')
     }
   }
@@ -451,7 +442,6 @@ function App() {
     if (!row?.code) return
     const code = String(row.code).toUpperCase()
     const base = universeByCode.get(code) || {}
-    setStockDrawerOpen(false)
     setSelected({
       ...base,
       ...row,
@@ -605,7 +595,7 @@ function App() {
   }
 
   return (
-    <div className={`app-shell ${modalOpen ? 'modal-open' : ''} ${stockDrawerOpen ? 'drawer-open' : ''}`}>
+    <div className={`app-shell ${modalOpen ? 'modal-open' : ''}`}>
       <header className="topbar">
         <div className="brand">
           <span className="brand-kicker">US MARKET VIEW</span>
@@ -643,34 +633,16 @@ function App() {
         </div>
       </header>
 
-      {stockDrawerOpen ? (
-        <button
-          type="button"
-          className="drawer-backdrop"
-          onClick={() => setStockDrawerOpen(false)}
-          aria-label="주식목록 닫기"
-        />
-      ) : null}
-
       <main className="layout">
-        <aside id="stocks" className={`panel stock-panel ${stockDrawerOpen ? 'mobile-open' : ''}`}>
+        <aside id="stocks" className="panel stock-panel">
           <div className="panel-head">
             <div>
               <h2>주식목록</h2>
               <p>{filtered.length} 종목</p>
             </div>
-            <button
-              type="button"
-              className="drawer-close"
-              onClick={() => setStockDrawerOpen(false)}
-              aria-label="주식목록 닫기"
-            >
-              닫기
-            </button>
           </div>
           <div className="search">
             <input
-              ref={stockSearchRef}
               placeholder="코드/종목명/섹터 검색"
               value={search}
               onChange={e => setSearch(e.target.value)}
@@ -854,23 +826,66 @@ function App() {
               </div>
             ) : null}
           </section>
+
+          <section id="mobile-stocks" className="panel stock-panel-inline" aria-label="모바일 주식목록">
+            <div className="panel-head">
+              <div>
+                <h2>주식목록</h2>
+                <p>{filtered.length} 종목</p>
+              </div>
+            </div>
+            <div className="search">
+              <input
+                placeholder="코드/종목명/섹터 검색"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
+            <div className="list">
+              {filtered.map((row) => (
+                <button
+                  key={`mobile-${row.code}`}
+                  className={`list-row ${selected?.code === row.code ? 'active' : ''}`}
+                  onClick={() => openStockModal(row)}
+                >
+                  <div>
+                    <div className="ticker">{row.code}</div>
+                    <div className="name">{row.name}</div>
+                    <div className="meta">
+                      <span>{row.sector_name || UNCLASSIFIED_LABEL}</span>
+                      {row.industry_name ? <span className="dot">•</span> : null}
+                      {row.industry_name ? <span>{row.industry_name}</span> : null}
+                    </div>
+                  </div>
+                  <div className="tag">{row.market}</div>
+                </button>
+              ))}
+            </div>
+          </section>
         </section>
       </main>
+
+      <CoupangBanner disabled={modalOpen} />
 
       <div className="mobile-actionbar" aria-label="모바일 빠른 메뉴">
         <button
           type="button"
           className="mobile-action"
-          onClick={() => setStockDrawerOpen(true)}
+          onClick={() => {
+            document.getElementById('mobile-stocks')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }}
         >
           주식목록 ({filtered.length})
         </button>
         <button
           type="button"
           className="mobile-action"
-          onClick={() => loadData()}
+          onClick={() => {
+            const el = document.getElementById('final') || document.getElementById('filters')
+            el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }}
         >
-          새로고침
+          매수후보
         </button>
         <a
           className="mobile-action"
@@ -878,7 +893,7 @@ function App() {
           target="_blank"
           rel="noopener noreferrer"
         >
-          디스코드
+          디스코드 알람받기
         </a>
       </div>
 

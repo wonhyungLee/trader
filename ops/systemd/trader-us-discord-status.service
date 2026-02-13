@@ -1,0 +1,14 @@
+[Unit]
+Description=Trader-US Discord Status Notifier (Recommendations + Health)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trader-US
+Environment=PYTHONUNBUFFERED=1
+# Only this job should send Discord messages. Other background jobs keep Discord disabled in config.
+Environment=DISCORD_NOTIFY_ENABLED=1
+ExecStart=/home/ubuntu/trader-US/.venv/bin/python -u -m src.utils.discord_status_notifier
+
