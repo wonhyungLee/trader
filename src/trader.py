@@ -267,11 +267,16 @@ def cmd_cancel(store: SQLiteStore, settings: Dict, broker: KISBroker):
 
 def main():
     ensure_repo_root()
+    raise SystemExit("Viewer-US build: auto-trading is intentionally disabled.")
+
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=["close", "open", "sync", "cancel"], help="실행 모드")
     args = parser.parse_args()
 
     settings = load_settings()
+    trading_cfg = settings.get("trading", {}) or {}
+    if settings.get("env") == "viewer" or not bool(trading_cfg.get("enabled", False)):
+        raise SystemExit("viewer 모드에서는 자동매매가 비활성화되어 있습니다.")
     store = SQLiteStore(settings.get("database", {}).get("path", "data/market_data.db"))
     broker = KISBroker(settings)
     job_id = store.start_job(f"trader_{args.mode}")

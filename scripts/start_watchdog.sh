@@ -7,7 +7,7 @@ fi
 cd "$ROOT"
 export PYTHONUNBUFFERED=1
 
-PYBIN="./myenv/bin/python"
+PYBIN="./.venv/bin/python"
 if [ ! -x "$PYBIN" ]; then
   PYBIN="python3"
 fi

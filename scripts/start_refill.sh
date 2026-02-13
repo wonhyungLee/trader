@@ -1,18 +1,24 @@
 #!/usr/bin/env bash
-set -e
-# Get the directory of the script
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PARENT_DIR="$(dirname "$DIR")"
-cd "$PARENT_DIR"
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "$ROOT" ]; then
+  ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+cd "$ROOT"
 
 echo "Starting refill at $(date)"
 export PYTHONUNBUFFERED=1
-export PYTHONPATH="$PARENT_DIR"
+export PYTHONPATH="$ROOT"
 
-./myenv/bin/python -u -m src.collectors.refill_loader 
-  --universe data/universe_kospi100.csv 
-  --universe data/universe_kosdaq150.csv 
-  --chunk-days 150 
+PYBIN="./.venv/bin/python"
+if [ ! -x "$PYBIN" ]; then
+  PYBIN="python3"
+fi
+
+$PYBIN -u -m src.collectors.refill_loader \
+  --chunk-days 150 \
+  --start-mode listing \
+  --sleep 0.1 \
   --resume
 
 echo "Refill script exited with $?"

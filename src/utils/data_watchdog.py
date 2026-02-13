@@ -131,7 +131,7 @@ def _run_accuracy_refill(
     return res.returncode
 
 
-def _run_daily_refill(chunk_days: int):
+def _run_daily_refill(chunk_days: int, limit: Optional[int] = None):
     cmd = [
         sys.executable,
         "-m",
@@ -139,6 +139,8 @@ def _run_daily_refill(chunk_days: int):
         "--chunk-days",
         str(chunk_days),
     ]
+    if limit is not None and int(limit) > 0:
+        cmd.extend(["--limit", str(int(limit))])
     logging.info("Running daily refill: %s", " ".join(cmd))
     res = subprocess.run(cmd, check=False)
     return res.returncode
@@ -154,6 +156,10 @@ def _load_cfg(settings: dict, args) -> Dict[str, object]:
     min_missing = int(args.min_missing if args.min_missing is not None else _get("accuracy_min_missing", 1))
     daily_min_missing = int(args.daily_min_missing if args.daily_min_missing is not None else _get("daily_min_missing", 1))
     daily_chunk_days = int(args.daily_chunk_days if args.daily_chunk_days is not None else _get("daily_chunk_days", 90))
+    daily_limit_raw = args.daily_limit if args.daily_limit is not None else _get("daily_limit", 20)
+    daily_limit = int(daily_limit_raw) if daily_limit_raw is not None else None
+    if daily_limit is not None and daily_limit <= 0:
+        daily_limit = None
     daily_cooldown = float(args.daily_cooldown if args.daily_cooldown is not None else _get("daily_cooldown_sec", 7200))
     if args.daily_enabled is None:
         daily_enabled = bool(_get("daily_enabled", True))
@@ -178,6 +184,7 @@ def _load_cfg(settings: dict, args) -> Dict[str, object]:
         "min_missing": min_missing,
         "daily_min_missing": daily_min_missing,
         "daily_chunk_days": daily_chunk_days,
+        "daily_limit": daily_limit,
         "daily_cooldown": daily_cooldown,
         "daily_enabled": daily_enabled,
         "notify_every": notify_every,
@@ -259,11 +266,13 @@ def run_once(settings: dict, cfg: Dict[str, object]) -> None:
                 daily_lock_path.write_text(str(os.getpid()), encoding="utf-8")
                 try:
                     maybe_notify(settings, f"[watchdog] daily refill start missing={daily_missing_count} date={last_date}")
-                    rc = _run_daily_refill(int(cfg["daily_chunk_days"]))
+                    rc = _run_daily_refill(int(cfg["daily_chunk_days"]), cfg["daily_limit"])
                     state["last_daily_run_ts"] = time.time()
                     state["last_daily_date"] = last_date
                     state["last_daily_missing"] = daily_missing_count
                     state["last_daily_rc"] = rc
+                    if cfg["daily_limit"] is not None:
+                        state["last_daily_limit"] = int(cfg["daily_limit"])
                     _write_state(state_path, state)
                     if rc != 0:
                         maybe_notify(settings, f"[watchdog] daily refill exited rc={rc}")
@@ -323,6 +332,7 @@ def main():
     parser.add_argument("--min-missing", type=int, default=None, help="min missing codes to trigger refill")
     parser.add_argument("--daily-min-missing", type=int, default=None, help="min missing daily codes to trigger refill")
     parser.add_argument("--daily-chunk-days", type=int, default=None, help="daily loader chunk days")
+    parser.add_argument("--daily-limit", type=int, default=None, help="daily loader max code count per run")
     parser.add_argument("--daily-lock-file", type=str, default=None, help="daily loader lock file")
     parser.add_argument("--notify-every", type=int, default=None, help="notify every n codes during refill")
     parser.add_argument("--item-sleep", type=float, default=None, help="sleep seconds per code during refill")

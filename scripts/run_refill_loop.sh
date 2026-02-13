@@ -15,10 +15,14 @@ while true; do
     echo "Launching refill process (Full Universe)..."
     
     # Removed --limit 50 to process all remaining stocks in one go
-    ./myenv/bin/python -u -m src.collectors.refill_loader \
-      --universe data/universe_kospi100.csv \
-      --universe data/universe_kosdaq150.csv \
+    PYBIN="./.venv/bin/python"
+    if [ ! -x "$PYBIN" ]; then
+      PYBIN="python3"
+    fi
+    $PYBIN -u -m src.collectors.refill_loader \
       --chunk-days 150 \
+      --start-mode listing \
+      --sleep 0.1 \
       --resume
 
     EXIT_CODE=$?

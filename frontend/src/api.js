@@ -9,21 +9,15 @@ const api = axios.create({ baseURL });
 export const fetchUniverse = (sector) => api.get('/universe', { params: sector ? { sector } : {} }).then(r => r.data);
 export const fetchSectors = () => api.get('/sectors').then(r => r.data);
 export const fetchPrices = (code, days = 60) => api.get('/prices', { params: { code, days } }).then(r => r.data);
-export const fetchSignals = () => api.get('/signals').then(r => r.data);
-export const fetchStatus = () => api.get('/status').then(r => r.data);
-export const fetchEngines = () => api.get('/engines').then(r => r.data);
-export const fetchOrders = () => api.get('/orders').then(r => r.data);
-export const fetchPositions = () => api.get('/positions').then(r => r.data);
-export const fetchPortfolio = () => api.get('/portfolio').then(r => r.data);
-export const fetchPlans = () => api.get('/plans').then(r => r.data);
-export const fetchAccount = () => api.get('/account').then(r => r.data);
+export const fetchCurrentPrice = (code) => api.get('/current_price', { params: { code } }).then(r => r.data);
 export const fetchSelection = () => api.get('/selection').then(r => r.data);
 export const fetchSelectionFilters = () => api.get('/selection_filters').then(r => r.data);
+export const fetchStatus = () => api.get('/status').then(r => r.data);
 export const fetchStrategy = () => api.get('/strategy').then(r => r.data);
 export const fetchJobs = () => api.get('/jobs').then(r => r.data);
 export const triggerExport = () => api.post('/export').then(r => r.data);
-export const fetchKisKeys = () => api.get('/kis_keys').then(r => r.data);
-export const updateKisKeyToggle = (id, enabled, password) =>
-  api.post('/kis_keys/toggle', { id, enabled, password }).then(r => r.data);
 export const updateSelectionFilterToggle = (key, enabled, password) =>
   api.post('/selection_filters/toggle', { key, enabled, password }).then(r => r.data);
+
+export const overrideSector = (code, sector_name, password) =>
+  api.post('/sector_override', { code, sector_name, password }).then(r => r.data);

@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   fetchUniverse,
-  fetchSectors,
   fetchPrices,
-  fetchPlans,
-  fetchAccount,
+  fetchCurrentPrice,
   fetchSelection,
   fetchSelectionFilters,
-  fetchPortfolio,
-  fetchKisKeys,
-  updateKisKeyToggle,
-  updateSelectionFilterToggle
+  fetchStatus,
+  updateSelectionFilterToggle,
+  overrideSector
 } from './api'
 import {
   ResponsiveContainer,
@@ -29,6 +26,9 @@ import {
 } from 'recharts'
 import './App.css'
 
+const PRICE_DAYS = 5000
+const UNCLASSIFIED_LABEL = '미분류'
+
 const formatNumber = (value) => {
   if (value === null || value === undefined || Number.isNaN(value)) return '-'
   const num = Number(value)
@@ -44,16 +44,16 @@ const formatCurrency = (value) => {
   const num = Number(value)
   if (!Number.isFinite(num)) return '-'
   if (typeof Intl === 'undefined' || !Intl.NumberFormat) {
-    return `₩${formatNumber(num)}`
+    return `$${formatNumber(num)}`
   }
   try {
-    return new Intl.NumberFormat('ko-KR', {
+    return new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency: 'KRW',
-      maximumFractionDigits: 0
+      currency: 'USD',
+      maximumFractionDigits: 2
     }).format(num)
   } catch (e) {
-    return `₩${formatNumber(num)}`
+    return `$${formatNumber(num)}`
   }
 }
 
@@ -76,63 +76,60 @@ const formatTime = (value) => {
 
 const asArray = (value) => (Array.isArray(value) ? value : [])
 
+const normalizeGroup = (value) => String(value || '').toUpperCase().replace(/&/g, '').replace(/\s+/g, '')
+
+const getGroupTokens = (row) => {
+  const raw = normalizeGroup(row?.group ?? row?.group_name ?? '')
+  const tokens = raw.split(/[,/|]+/).filter(Boolean)
+  return { raw, tokens }
+}
+
+const isNasdaqMember = (row) => {
+  const { raw, tokens } = getGroupTokens(row)
+  if (raw) return raw.includes('NASDAQ100') || tokens.includes('NASDAQ100')
+  const market = String(row?.market || '').toUpperCase()
+  return market.includes('NASDAQ')
+}
+
+const isSp500Member = (row) => {
+  const { raw, tokens } = getGroupTokens(row)
+  if (raw) return raw.includes('SP500') || tokens.includes('SP500')
+  const market = String(row?.market || '').toUpperCase()
+  return market.includes('SP500') || market.includes('S&P')
+}
+
 function App() {
   const [universe, setUniverse] = useState([])
-  const [filter, setFilter] = useState('KOSPI100')
+  const [filter, setFilter] = useState('ALL')
   const [selected, setSelected] = useState(null)
   const [prices, setPrices] = useState([])
   const [pricesLoading, setPricesLoading] = useState(false)
-  const [days, setDays] = useState(120)
-  const [plans, setPlans] = useState({ buys: [], sells: [], exec_date: null })
-  const [account, setAccount] = useState(null)
-  const [selection, setSelection] = useState({ stages: [], candidates: [], pricing: {} })
-  const [portfolio, setPortfolio] = useState({ positions: [], totals: {} })
-  const [sectors, setSectors] = useState([])
+  const [currentPrice, setCurrentPrice] = useState(null)
+  const [currentPriceLoading, setCurrentPriceLoading] = useState(false)
+  const [selection, setSelection] = useState({ stages: [], candidates: [], stage_items: {} })
+  const [status, setStatus] = useState(null)
   const [sectorFilter, setSectorFilter] = useState('ALL')
   const [search, setSearch] = useState('')
   const [lastUpdated, setLastUpdated] = useState(null)
-  const [kisKeys, setKisKeys] = useState([])
-  const [kisError, setKisError] = useState('')
   const [filterToggles, setFilterToggles] = useState({ min_amount: true, liquidity: true, disparity: true })
   const [filterError, setFilterError] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [zoomRange, setZoomRange] = useState({ start: 0, end: 0 })
   const [zoomArmed, setZoomArmed] = useState(false)
+  const [sectorOverrideValue, setSectorOverrideValue] = useState('')
+  const [sectorOverrideSaving, setSectorOverrideSaving] = useState(false)
+  const [sectorOverrideError, setSectorOverrideError] = useState('')
   const chartWheelRef = useRef(null)
   const [openHelp, setOpenHelp] = useState(null)
 
-  const loadData = (sectorOverride) => {
-    const sector = typeof sectorOverride === 'string' ? sectorOverride : sectorFilter
-    fetchUniverse(sector && sector !== 'ALL' ? sector : undefined).then((data) => setUniverse(asArray(data)))
-    fetchSectors().then((data) => setSectors(asArray(data)))
-    fetchPortfolio().then((data) => {
-      const payload = data && typeof data === 'object' ? data : {}
-      setPortfolio({
-        positions: asArray(payload.positions),
-        totals: payload.totals && typeof payload.totals === 'object' ? payload.totals : {},
-      })
-    })
-    fetchPlans().then((data) => {
-      const payload = data && typeof data === 'object' ? data : {}
-      const buys = asArray(payload.buys)
-      const sells = asArray(payload.sells)
-      setPlans({
-        ...payload,
-        buys,
-        sells,
-        counts: payload.counts && typeof payload.counts === 'object'
-          ? payload.counts
-          : { buys: buys.length, sells: sells.length },
-      })
-    })
-    fetchAccount().then((data) => setAccount(data && typeof data === 'object' ? data : null))
+  const loadData = () => {
+    fetchUniverse().then((data) => setUniverse(asArray(data)))
     fetchSelection().then((data) => {
       const payload = data && typeof data === 'object' ? data : {}
       setSelection({
         ...payload,
         stages: asArray(payload.stages),
         candidates: asArray(payload.candidates),
-        pricing: payload.pricing && typeof payload.pricing === 'object' ? payload.pricing : {},
         stage_items: payload.stage_items && typeof payload.stage_items === 'object' ? payload.stage_items : {},
       })
       if (payload.filter_toggles && typeof payload.filter_toggles === 'object') {
@@ -151,7 +148,9 @@ function App() {
         disparity: payload.disparity !== false,
       })
     }).catch(() => {})
-    fetchKisKeys().then((data) => setKisKeys(asArray(data))).catch(() => setKisKeys([]))
+    fetchStatus().then((data) => {
+      setStatus(data && typeof data === 'object' ? data : null)
+    }).catch(() => {})
     setLastUpdated(new Date())
   }
 
@@ -159,12 +158,12 @@ function App() {
     loadData()
     const id = setInterval(() => loadData(), 30000)
     return () => clearInterval(id)
-  }, [sectorFilter])
+  }, [])
 
   useEffect(() => {
     if (!selected) return
     setPricesLoading(true)
-    fetchPrices(selected.code, days)
+    fetchPrices(selected.code, PRICE_DAYS)
       .then((data) => {
         setPrices(Array.isArray(data) ? data : [])
       })
@@ -172,7 +171,31 @@ function App() {
         setPrices([])
       })
       .finally(() => setPricesLoading(false))
-  }, [selected, days])
+  }, [selected])
+
+  useEffect(() => {
+    if (!selected || !modalOpen) return
+    let mounted = true
+    const loadCurrentPrice = () => {
+      setCurrentPriceLoading(true)
+      fetchCurrentPrice(selected.code)
+        .then((data) => {
+          if (mounted) setCurrentPrice(data && typeof data === 'object' ? data : null)
+        })
+        .catch(() => {
+          if (mounted) setCurrentPrice(null)
+        })
+        .finally(() => {
+          if (mounted) setCurrentPriceLoading(false)
+        })
+    }
+    loadCurrentPrice()
+    const id = setInterval(loadCurrentPrice, 60000)
+    return () => {
+      mounted = false
+      clearInterval(id)
+    }
+  }, [selected?.code, modalOpen])
 
   useEffect(() => {
     setSectorFilter('ALL')
@@ -185,6 +208,13 @@ function App() {
 
   useEffect(() => {
     document.body.style.overflow = modalOpen ? 'hidden' : ''
+    if (!modalOpen) {
+      setCurrentPrice(null)
+      setCurrentPriceLoading(false)
+      setSectorOverrideValue('')
+      setSectorOverrideSaving(false)
+      setSectorOverrideError('')
+    }
     return () => {
       document.body.style.overflow = ''
     }
@@ -194,56 +224,105 @@ function App() {
     if (!modalOpen) setZoomArmed(false)
   }, [modalOpen])
 
-  const filtered = useMemo(() => {
-    const target = asArray(universe).filter(u => u.group === filter)
-    const keyword = search.trim().toLowerCase()
-    if (!keyword) return target
-    return target.filter(u =>
-      u.code?.toLowerCase().includes(keyword) ||
-      u.name?.toLowerCase().includes(keyword) ||
-      u.sector_name?.toLowerCase().includes(keyword)
-    )
-  }, [universe, filter, search])
+  const universeRows = useMemo(() => {
+    const map = new Map()
+    asArray(universe).forEach((row) => {
+      if (!row || !row.code) return
+      const code = String(row.code).toUpperCase()
+      if (!map.has(code)) {
+        map.set(code, { ...row, code })
+        return
+      }
+      const existing = map.get(code)
+      const mergedGroup = [existing.group, row.group].filter(Boolean).join(',')
+      if (mergedGroup) existing.group = mergedGroup
+    })
+    return Array.from(map.values())
+  }, [universe])
 
-  const marketFilter = filter === 'KOSPI100' ? 'KOSPI' : 'KOSDAQ'
-  const sectorOptions = useMemo(
-    () => asArray(sectors).filter(s => s.market === marketFilter).sort((a, b) => b.count - a.count),
-    [sectors, marketFilter]
-  )
+  const nasdaqRows = useMemo(() => universeRows.filter(isNasdaqMember), [universeRows])
+  const sp500Rows = useMemo(() => universeRows.filter(isSp500Member), [universeRows])
+  const allRows = useMemo(() => {
+    const map = new Map()
+    nasdaqRows.concat(sp500Rows).forEach((row) => {
+      if (!map.has(row.code)) map.set(row.code, row)
+    })
+    return Array.from(map.values())
+  }, [nasdaqRows, sp500Rows])
+
+  const activeUniverse = useMemo(() => {
+    if (filter === 'NASDAQ100') return nasdaqRows
+    if (filter === 'SP500') return sp500Rows
+    return allRows
+  }, [filter, nasdaqRows, sp500Rows, allRows])
+
+  const universeByCode = useMemo(() => {
+    const map = new Map()
+    universeRows.forEach((row) => {
+      if (!row?.code) return
+      map.set(String(row.code).toUpperCase(), row)
+    })
+    return map
+  }, [universeRows])
+
+  const sectorOptions = useMemo(() => {
+    const map = new Map()
+    activeUniverse.forEach((row) => {
+      const name = row.sector_name || UNCLASSIFIED_LABEL
+      map.set(name, (map.get(name) || 0) + 1)
+    })
+    return Array.from(map.entries())
+      .map(([sector_name, count]) => ({ sector_name, count }))
+      .sort((a, b) => b.count - a.count)
+  }, [activeUniverse])
+
+  const knownSectorOptions = useMemo(() => {
+    const invalid = new Set(['nan', 'none', 'null', 'na', 'n/a', 'unknown'])
+    const map = new Map()
+    universeRows.forEach((row) => {
+      const raw = String(row?.sector_name || '').trim()
+      const name = raw || UNCLASSIFIED_LABEL
+      const lower = name.toLowerCase()
+      if (!name) return
+      if (name === UNCLASSIFIED_LABEL) return
+      if (invalid.has(lower)) return
+      map.set(name, (map.get(name) || 0) + 1)
+    })
+    return Array.from(map.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => (b.count - a.count) || a.name.localeCompare(b.name))
+  }, [universeRows])
+
+  const filtered = useMemo(() => {
+    const keyword = search.trim().toLowerCase()
+    return activeUniverse
+      .filter((row) => (sectorFilter === 'ALL' ? true : String(row.sector_name || UNCLASSIFIED_LABEL) === sectorFilter))
+      .filter((row) => {
+        if (!keyword) return true
+        return String(row.code || '').toLowerCase().includes(keyword)
+          || String(row.name || '').toLowerCase().includes(keyword)
+          || String(row.sector_name || '').toLowerCase().includes(keyword)
+      })
+  }, [activeUniverse, sectorFilter, search])
 
   const chartData = useMemo(() => [...prices].reverse(), [prices])
   const latest = chartData.length ? chartData[chartData.length - 1] : null
   const previous = chartData.length > 1 ? chartData[chartData.length - 2] : null
   const delta = latest && previous ? latest.close - previous.close : 0
   const deltaPct = latest && previous && previous.close ? (delta / previous.close) * 100 : 0
+  const livePriceValue = currentPrice?.price ?? latest?.close
+  const liveChangePct = currentPrice?.change_pct ?? deltaPct
+  const liveAsOfLabel = currentPrice?.asof || latest?.date || '-'
+  const liveSourceLabel = currentPrice?.source || 'db'
 
   useEffect(() => {
     if (!chartData.length) return
     setZoomRange({ start: 0, end: chartData.length - 1 })
   }, [chartData.length, modalOpen])
 
-  const planBuys = asArray(plans?.buys)
-  const accountSummary = account?.summary || {}
-  const portfolioPositions = asArray(portfolio?.positions)
-  const portfolioTotals = portfolio?.totals || {}
   const selectionStages = asArray(selection?.stages)
-  const selectionPricing = selection?.pricing || {}
   const selectionStageItems = selection?.stage_items && typeof selection.stage_items === 'object' ? selection.stage_items : {}
-
-  const expectedReturn = Number(selectionPricing.sell_rules?.take_profit_ret)
-  const expectedReturnPct = Number.isFinite(expectedReturn) ? expectedReturn * 100 : null
-
-  const handleKisToggle = async (row) => {
-    const password = window.prompt('KIS 계좌 토글 비밀번호를 입력하세요')
-    if (!password) return
-    try {
-      const updated = await updateKisKeyToggle(row.id, !row.enabled, password)
-      setKisKeys(asArray(updated))
-      setKisError('')
-    } catch (e) {
-      setKisError('비밀번호가 올바르지 않거나 서버 오류가 발생했습니다.')
-    }
-  }
+  const selectionCandidates = asArray(selection?.candidates)
 
   const handleFilterToggle = async (key) => {
     const password = window.prompt('필터 토글 비밀번호를 입력하세요')
@@ -262,15 +341,64 @@ function App() {
     }
   }
 
+  const handleSectorOverrideSave = async () => {
+    if (!selected?.code) return
+    const sector_name = sectorOverrideValue.trim()
+    if (!sector_name) {
+      setSectorOverrideError('섹터를 선택하세요.')
+      return
+    }
+    const password = window.prompt('섹터 수정 비밀번호를 입력하세요')
+    if (!password) return
+    setSectorOverrideSaving(true)
+    try {
+      const res = await overrideSector(selected.code, sector_name, password)
+      setSectorOverrideError('')
+      setSelected((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          sector_name: res?.sector_name || sector_name,
+          industry_name: res?.industry_name || prev.industry_name,
+        }
+      })
+      loadData()
+    } catch (e) {
+      const msg = e?.response?.data?.error
+      setSectorOverrideError(msg ? `저장 실패: ${msg}` : '섹터 저장에 실패했습니다.')
+    } finally {
+      setSectorOverrideSaving(false)
+    }
+  }
+
+  const openStockModal = useCallback((row) => {
+    if (!row?.code) return
+    const code = String(row.code).toUpperCase()
+    const base = universeByCode.get(code) || {}
+    setSelected({
+      ...base,
+      ...row,
+      code,
+      name: row.name || base.name || code,
+      market: row.market || base.market || '-',
+      sector_name: row.sector_name || base.sector_name || UNCLASSIFIED_LABEL,
+      industry_name: row.industry_name || base.industry_name || '',
+    })
+    setSectorOverrideValue('')
+    setSectorOverrideSaving(false)
+    setSectorOverrideError('')
+    setModalOpen(true)
+  }, [universeByCode])
+
   const formatStageValue = (stage) => {
     if (!stage) return '-'
     if (stage.key === 'min_amount') return formatCurrency(stage.value)
     if (stage.key === 'liquidity') return `Top ${stage.value}`
     if (stage.key === 'final') return `Max ${stage.value}`
     if (stage.key === 'disparity' && stage.value) {
-      const k = formatPct((stage.value.kospi || 0) * 100)
-      const q = formatPct((stage.value.kosdaq || 0) * 100)
-      return `KOSPI ${k} · KOSDAQ ${q}`
+      const k = formatPct((stage.value.nasdaq || 0) * 100)
+      const q = formatPct((stage.value.sp500 || 0) * 100)
+      return `NASDAQ ${k} · S&P500 ${q}`
     }
     return stage.value ?? '-'
   }
@@ -324,9 +452,58 @@ function App() {
       items,
     }
   })
+  // Final == 최종 후보; avoid showing duplicate cards in the flow grid.
+  const flowStages = stageNodes.filter((stage) => stage.key !== 'final')
 
   const stageColumns = stageNodes.filter((node) => ['min_amount', 'liquidity', 'disparity'].includes(node.key))
   const finalStage = stageNodes.find((node) => node.key === 'final')
+  const finalCandidates = useMemo(() => {
+    const fromCandidates = selectionCandidates
+      .filter((row) => row && row.code)
+      .map((row, idx) => ({ ...row, rank: row.rank || (idx + 1) }))
+    if (fromCandidates.length) return fromCandidates
+    return asArray(finalStage?.items)
+      .filter((row) => row && row.code)
+      .map((row, idx) => ({ ...row, rank: row.rank || (idx + 1) }))
+  }, [selectionCandidates, finalStage])
+  const disparityCount = stageMap.disparity?.count || 0
+  const finalCount = finalStage?.count || finalCandidates.length
+  const finalPassRate = universeCount ? (finalCount / universeCount) * 100 : 0
+  const selectionDateLabel = selection?.date || '-'
+  const watchdogRuntime = status?.watchdog_runtime && typeof status.watchdog_runtime === 'object'
+    ? status.watchdog_runtime
+    : {}
+  const dailyLockActive = watchdogRuntime.daily_lock_active === true
+  const watchdogExternal = status?.watchdog_external && typeof status.watchdog_external === 'object'
+    ? status.watchdog_external
+    : {}
+  const watchdogLastRunTs = Number(watchdogExternal.last_daily_run_ts || 0)
+  const watchdogHasState = Object.keys(watchdogExternal).length > 0
+  const watchdogMissing = watchdogExternal.last_daily_missing
+  const watchdogRunTimeLabel = watchdogLastRunTs
+    ? new Date(watchdogLastRunTs * 1000).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+    : '-'
+  const watchdogDateLabel = watchdogExternal.last_daily_date || '-'
+  const watchdogAgeSec = watchdogLastRunTs ? Math.max(0, (Date.now() / 1000) - watchdogLastRunTs) : null
+  let watchdogStateText = 'INIT'
+  let watchdogStateClass = 'status-warn'
+  if (dailyLockActive) {
+    watchdogStateText = 'RUNNING'
+    watchdogStateClass = 'status-warn'
+  } else if (!watchdogHasState) {
+    watchdogStateText = 'NO DATA'
+  } else if (watchdogExternal.last_daily_rc === 0) {
+    if (watchdogAgeSec !== null && watchdogAgeSec > 21600) {
+      watchdogStateText = 'STALE'
+      watchdogStateClass = 'status-warn'
+    } else {
+      watchdogStateText = 'OK'
+      watchdogStateClass = 'status-ok'
+    }
+  } else if (watchdogExternal.last_daily_rc != null) {
+    watchdogStateText = 'ERROR'
+    watchdogStateClass = 'status-error'
+  }
 
   const refreshLabel = lastUpdated
     ? `${lastUpdated.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`
@@ -344,19 +521,6 @@ function App() {
     if (!data.length) return []
     return [...data].reverse().slice(0, 30)
   }, [chartData, zoomedData])
-
-  const expectedSellPrice = (price) => {
-    const p = Number(price)
-    if (!Number.isFinite(p) || !Number.isFinite(expectedReturn)) return null
-    return p * (1 + expectedReturn)
-  }
-
-  const rangeOptions = [
-    { label: '1Y', value: 252 },
-    { label: '5Y', value: 252 * 5 },
-    { label: '10Y', value: 252 * 10 },
-    { label: 'MAX', value: 5000 }
-  ]
 
   const handleChartWheel = (event) => {
     if (!chartData.length) return
@@ -405,29 +569,26 @@ function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-kicker">REAL TRADE ONLY</span>
-          <h1 className="brand-title">BNF-K Trade Studio</h1>
-          <p className="brand-sub">필터링부터 매수·매도까지 필요한 데이터만 집중 노출합니다.</p>
+          <span className="brand-kicker">US MARKET VIEW</span>
+          <h1 className="brand-title">BNF US Trade Studio</h1>
+          <p className="brand-sub">NASDAQ100 + S&amp;P500 데이터 기반의 시각화 대시보드입니다.</p>
         </div>
         <div className="controls">
           <div className="segmented">
-            <button className={filter === 'KOSPI100' ? 'active' : ''} onClick={() => setFilter('KOSPI100')}>KOSPI 100</button>
-            <button className={filter === 'KOSDAQ150' ? 'active' : ''} onClick={() => setFilter('KOSDAQ150')}>KOSDAQ 150</button>
+            <button className={filter === 'ALL' ? 'active' : ''} onClick={() => setFilter('ALL')}>ALL</button>
+            <button className={filter === 'NASDAQ100' ? 'active' : ''} onClick={() => setFilter('NASDAQ100')}>NASDAQ 100</button>
+            <button className={filter === 'SP500' ? 'active' : ''} onClick={() => setFilter('SP500')}>S&amp;P 500</button>
           </div>
           <div className="control">
             <label>Sector</label>
             <select value={sectorFilter} onChange={e => setSectorFilter(e.target.value)}>
               <option value="ALL">전체 섹터</option>
               {sectorOptions.map((s, i) => (
-                <option key={`${s.market}-${s.sector_name}-${i}`} value={s.sector_name}>
+                <option key={`sector-${s.sector_name}-${i}`} value={s.sector_name}>
                   {s.sector_name} ({s.count})
                 </option>
               ))}
             </select>
-          </div>
-          <div className="control">
-            <label>Days</label>
-            <input type="number" value={days} onChange={e => setDays(Number(e.target.value) || 60)} min={10} max={400} />
           </div>
           <button className="primary-btn" onClick={() => loadData()}>Refresh</button>
           <div className="refresh-meta">최근 업데이트 {refreshLabel}</div>
@@ -436,40 +597,41 @@ function App() {
 
       <section id="summary" className="summary-strip">
         <div className="summary-card">
-          <span>총자산</span>
-          <strong>{formatCurrency(accountSummary.total_assets)}</strong>
-          <em>계좌 {account?.connected ? '연결됨' : '미연결'}</em>
+          <span>유니버스</span>
+          <strong>{formatNumber(universeCount)}</strong>
+          <em>{filter === 'NASDAQ100' ? 'NASDAQ 100' : 'S&P 500'} 기준</em>
         </div>
         <div className="summary-card">
-          <span>현금</span>
-          <strong>{formatCurrency(accountSummary.cash)}</strong>
-          <em>잔고 조회</em>
+          <span>필터 통과</span>
+          <strong>{formatNumber(disparityCount)}</strong>
+          <em>통과율 {universeCount ? ((disparityCount / universeCount) * 100).toFixed(1) : '0.0'}%</em>
         </div>
         <div className="summary-card">
-          <span>보유자산</span>
-          <strong>{formatCurrency(accountSummary.positions_value)}</strong>
-          <em>보유 평가액</em>
+          <span>최종 후보</span>
+          <strong>{formatNumber(finalCount)}</strong>
+          <em>선정 비율 {universeCount ? finalPassRate.toFixed(1) : '0.0'}%</em>
         </div>
         <div className="summary-card">
-          <span>수익률</span>
-          <strong className={accountSummary.total_pnl >= 0 ? 'up' : 'down'}>
-            {formatCurrency(accountSummary.total_pnl)}
-          </strong>
-          <em>{formatPct(accountSummary.total_pnl_pct)}</em>
+          <span>기준일</span>
+          <strong>{selectionDateLabel}</strong>
+          <em>최근 업데이트 {refreshLabel}</em>
         </div>
         <div className="summary-card">
-          <span>기대 수익률</span>
-          <strong>{expectedReturnPct === null ? '-' : `${expectedReturnPct.toFixed(2)}%`}</strong>
-          <em>자동매매 기준</em>
+          <span>DB Watchdog</span>
+          <strong className={`status-chip ${watchdogStateClass}`}>{watchdogStateText}</strong>
+          <em>{watchdogDateLabel} · {watchdogRunTimeLabel} · miss {watchdogMissing ?? '-'}</em>
+        </div>
+        <div className="summary-card">
+          <span>Discord 알림</span>
+          <strong>ON</strong>
+          <em>신규 편입 시 전송</em>
         </div>
       </section>
 
       <nav className="section-nav">
         <a href="#stocks">주식목록</a>
         <a href="#filters">선별 과정</a>
-        <a href="#plans">매수 예상</a>
-        <a href="#results">자동매매 결과</a>
-        <a href="#account">계좌/수익률</a>
+        <a href="#final">최종 후보</a>
       </nav>
 
       <main className="layout">
@@ -492,16 +654,13 @@ function App() {
               <button
                 key={row.code}
                 className={`list-row ${selected?.code === row.code ? 'active' : ''}`}
-                onClick={() => {
-                  setSelected(row)
-                  setModalOpen(true)
-                }}
+                onClick={() => openStockModal(row)}
               >
                 <div>
                   <div className="ticker">{row.code}</div>
                   <div className="name">{row.name}</div>
                   <div className="meta">
-                    <span>{row.sector_name || 'UNKNOWN'}</span>
+                    <span>{row.sector_name || UNCLASSIFIED_LABEL}</span>
                     {row.industry_name ? <span className="dot">•</span> : null}
                     {row.industry_name ? <span>{row.industry_name}</span> : null}
                   </div>
@@ -523,7 +682,7 @@ function App() {
             </div>
             {filterError ? <div className="error-banner">{filterError}</div> : null}
             <div className="flow-grid">
-              {stageNodes.map((stage) => (
+              {flowStages.map((stage) => (
                 <div key={stage.key} className="flow-card">
                   <div className="flow-header">
                     <span>{stage.label}</span>
@@ -601,16 +760,16 @@ function App() {
             </div>
 
             {finalStage ? (
-              <div className="final-board">
+              <div id="final" className="final-board">
                 <div className="final-head">
                   <div>
-                    <div className="filter-tag">Final</div>
+                    <div className="filter-tag">최종 후보</div>
                     <div className="filter-title-row">
-                      <div className="final-title">{finalStage.label}</div>
+                      <div className="final-title">최종 후보</div>
                       <button
                         type="button"
                         className="help-icon"
-                        aria-label="Final 설명"
+                        aria-label="최종 후보 설명"
                         aria-expanded={openHelp === 'final'}
                         onClick={() => toggleHelp('final')}
                       >
@@ -622,156 +781,45 @@ function App() {
                     ) : null}
                     <div className="filter-criteria">{finalStage.criteria}</div>
                   </div>
-                  <div className="filter-count">{finalStage.count}</div>
+                  <div className="filter-count">{finalCount}</div>
                 </div>
-                <div className="final-list">
-                  {finalStage.items.map((row, idx) => (
-                    <div key={`final-${row.code}-${idx}`} className="final-row">
-                      <div>
-                        <div className="mono">{row.code}</div>
-                        <div className="filter-name">{row.name || '-'}</div>
-                      </div>
-                      <div className="filter-meta">
-                        <span>{formatCurrency(row.amount)}</span>
-                        <span className={(row.disparity ?? 0) <= 0 ? 'down' : 'up'}>
-                          {formatPct((row.disparity || 0) * 100)}
-                        </span>
-                      </div>
+                <div className="result-table">
+                  <div className="result-row head">
+                    <span>Rank</span>
+                    <span>Code</span>
+                    <span>Name</span>
+                    <span>Amount</span>
+                    <span>Disparity</span>
+                    <span>Market</span>
+                  </div>
+                  {finalCandidates.slice(0, 25).map((row, idx) => (
+                    <div
+                      key={`final-${row.code}-${idx}`}
+                      className="result-row result-clickable"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openStockModal(row)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          openStockModal(row)
+                        }
+                      }}
+                    >
+                      <span className="mono">{row.rank || '-'}</span>
+                      <span className="mono">{row.code}</span>
+                      <span>{row.name || '-'}</span>
+                      <span>{formatCurrency(row.amount)}</span>
+                      <span className={(row.disparity ?? 0) <= 0 ? 'down' : 'up'}>
+                        {formatPct((row.disparity || 0) * 100)}
+                      </span>
+                      <span>{row.market || '-'}</span>
                     </div>
                   ))}
-                  {finalStage.items.length === 0 && <div className="empty">최종 후보가 없습니다.</div>}
+                  {finalCandidates.length === 0 && <div className="empty">최종 후보가 없습니다.</div>}
                 </div>
               </div>
             ) : null}
-          </section>
-
-          
-
-          <section id="plans" className="panel section">
-            <div className="section-head">
-              <div>
-                <h2>자동매매 매수 예상</h2>
-                <p>계획된 매수 가격과 기대 수익률 기준을 표시합니다.</p>
-              </div>
-              <span className="section-meta">기대 수익률 {expectedReturnPct === null ? '-' : `${expectedReturnPct.toFixed(2)}%`}</span>
-            </div>
-            <div className="plan-list">
-              {planBuys.slice(0, 12).map((row) => (
-                <div key={row.id} className="plan-row">
-                  <div>
-                    <div className="mono">{row.code}</div>
-                    <div className="plan-name">{row.name || '-'}</div>
-                  </div>
-                  <div className="plan-meta">
-                    <span className="plan-price">{formatCurrency(row.planned_price)}</span>
-                    <span className="plan-qty">x{formatNumber(row.qty)}</span>
-                    <span className="plan-qty">예상 매도가 {formatCurrency(expectedSellPrice(row.planned_price))}</span>
-                  </div>
-                </div>
-              ))}
-              {planBuys.length === 0 && <div className="empty">매수 예정 종목이 없습니다.</div>}
-            </div>
-          </section>
-
-          <section id="results" className="panel section">
-            <div className="section-head">
-              <div>
-                <h2>자동매매 결과</h2>
-                <p>보유 포지션 기준으로 매수가격, 현재 매도가격, 수익률을 표시합니다.</p>
-              </div>
-              <span className="section-meta">총 {portfolioPositions.length}건</span>
-            </div>
-            <div className="result-table">
-              <div className="result-row head">
-                <span>Code</span>
-                <span>Name</span>
-                <span>매수가</span>
-                <span>매도가격(현재)</span>
-                <span>수익률</span>
-                <span>Updated</span>
-              </div>
-              {portfolioPositions.slice(0, 14).map((row) => (
-                <div key={row.code} className="result-row">
-                  <span className="mono">{row.code}</span>
-                  <span>{row.name}</span>
-                  <span>{formatCurrency(row.avg_price)}</span>
-                  <span>{formatCurrency(row.last_close)}</span>
-                  <span className={row.pnl_pct >= 0 ? 'up' : 'down'}>{formatPct(row.pnl_pct)}</span>
-                  <span>{formatTime(row.updated_at)}</span>
-                </div>
-              ))}
-              {portfolioPositions.length === 0 && <div className="empty">자동매매 결과가 없습니다.</div>}
-            </div>
-            <div className="result-total">
-              <span>평가손익</span>
-              <strong className={portfolioTotals.pnl >= 0 ? 'up' : 'down'}>
-                {formatCurrency(portfolioTotals.pnl)} ({formatPct(portfolioTotals.pnl_pct)})
-              </strong>
-            </div>
-          </section>
-
-          <section id="account" className="panel section">
-            <div className="section-head">
-              <div>
-                <h2>계좌 온오프</h2>
-                <p>KIS 계좌를 실전 모드로 제어합니다.</p>
-              </div>
-              <span className="section-meta">{account?.connected ? '연결됨' : '미연결'}</span>
-            </div>
-            {kisError ? <div className="error-banner">{kisError}</div> : null}
-            <div className="kis-list">
-              {kisKeys.map((row) => (
-                <div key={row.id} className={`kis-row ${row.enabled ? 'on' : 'off'}`}>
-                  <div className="kis-main">
-                    <div className="kis-label">{row.account || row.id}</div>
-                    <div className="kis-desc">{row.description || row.user || '실전 계좌'}</div>
-                  </div>
-                  <div className="kis-meta">
-                    <span>{row.env || 'real'}</span>
-                    <span>{row.updated_at ? formatTime(row.updated_at) : '-'}</span>
-                  </div>
-                  <button className={`kis-toggle ${row.enabled ? 'on' : 'off'}`} onClick={() => handleKisToggle(row)}>
-                    {row.enabled ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-              ))}
-              {kisKeys.length === 0 && <div className="empty">등록된 계좌가 없습니다.</div>}
-            </div>
-
-            <div className="divider" />
-
-            <div className="section-head">
-              <div>
-                <h2>잔고 · 수익률</h2>
-                <p>현재 잔고와 누적 수익률을 확인합니다.</p>
-              </div>
-              <span className="section-meta">{account?.connected_at ? new Date(account.connected_at).toLocaleDateString('ko-KR') : '-'}</span>
-            </div>
-            {account?.connected ? (
-              <div className="account-metrics">
-                <div className="metric-card">
-                  <span>총자산</span>
-                  <strong>{formatCurrency(accountSummary.total_assets)}</strong>
-                </div>
-                <div className="metric-card">
-                  <span>현금</span>
-                  <strong>{formatCurrency(accountSummary.cash)}</strong>
-                </div>
-                <div className="metric-card">
-                  <span>보유자산</span>
-                  <strong>{formatCurrency(accountSummary.positions_value)}</strong>
-                </div>
-                <div className="metric-card">
-                  <span>수익률</span>
-                  <strong className={accountSummary.total_pnl >= 0 ? 'up' : 'down'}>
-                    {formatCurrency(accountSummary.total_pnl)}
-                  </strong>
-                  <em>{formatPct(accountSummary.total_pnl_pct)}</em>
-                </div>
-              </div>
-            ) : (
-              <div className="empty">자동매매 계좌 연결 정보를 불러오지 못했습니다.</div>
-            )}
           </section>
         </section>
       </main>
@@ -785,20 +833,37 @@ function App() {
               <div>
                 <div className="ticker">{selected.code}</div>
                 <div className="name">{selected.name}</div>
-                <div className="meta">{selected.market} · {selected.sector_name || 'UNKNOWN'}</div>
+                <div className="meta">{selected.market} · {selected.sector_name || UNCLASSIFIED_LABEL}</div>
+                {(selected.sector_name || UNCLASSIFIED_LABEL) === UNCLASSIFIED_LABEL ? (
+                  <div className="sector-override">
+                    <span className="sector-override-label">섹터 지정</span>
+                    <select
+                      value={sectorOverrideValue}
+                      onChange={(e) => {
+                        setSectorOverrideValue(e.target.value)
+                        setSectorOverrideError('')
+                      }}
+                      disabled={sectorOverrideSaving || knownSectorOptions.length === 0}
+                    >
+                      <option value="">기존 섹터 선택...</option>
+                      {knownSectorOptions.map((opt) => (
+                        <option key={opt.name} value={opt.name}>{opt.name} ({opt.count})</option>
+                      ))}
+                    </select>
+                    <button
+                      className="sector-override-btn"
+                      onClick={handleSectorOverrideSave}
+                      disabled={!sectorOverrideValue || sectorOverrideSaving}
+                    >
+                      {sectorOverrideSaving ? '저장 중...' : '저장'}
+                    </button>
+                    {sectorOverrideError ? (
+                      <span className="sector-override-error">{sectorOverrideError}</span>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
               <div className="modal-actions">
-                <div className="range-tabs">
-                  {rangeOptions.map((option) => (
-                    <button
-                      key={option.label}
-                      className={days === option.value ? 'active' : ''}
-                      onClick={() => setDays(option.value)}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
                 <button
                   className={`zoom-toggle ${zoomArmed ? 'on' : ''}`}
                   onClick={() => setZoomArmed((prev) => !prev)}
@@ -814,11 +879,12 @@ function App() {
                 <div>
                   <div className="ticker">{selected.code}</div>
                   <div className="name">{selected.name}</div>
-                  <div className="meta">{selected.market} · {selected.sector_name || 'UNKNOWN'}</div>
+                  <div className="meta">{selected.market} · {selected.sector_name || UNCLASSIFIED_LABEL}</div>
                 </div>
-                <div className={`delta ${delta >= 0 ? 'up' : 'down'}`}>
-                  <div className="delta-value">{formatCurrency(latest?.close)}</div>
-                  <div className="delta-sub">{formatPct(deltaPct)}</div>
+                <div className={`delta ${Number(liveChangePct || 0) >= 0 ? 'up' : 'down'}`}>
+                  <div className="delta-label">Current Price {currentPriceLoading ? '· 업데이트 중' : ''}</div>
+                  <div className="delta-value">{formatCurrency(livePriceValue)}</div>
+                  <div className="delta-sub">{formatPct(liveChangePct)} · {formatTime(liveAsOfLabel)} · {String(liveSourceLabel).toUpperCase()}</div>
                 </div>
               </div>
 

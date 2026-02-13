@@ -39,6 +39,7 @@ class KISWebSocketClient:
         self.custtype = self.broker.custtype
         monitor = settings.get("monitor", {}) or {}
         self.tr_id = monitor.get("ws_tr_id", "H0STCNT0")
+        self.max_ws_subs = int(monitor.get("max_ws_subs", 20))
         # KIS 권고: 종목 구독/해제 메시지는 과도하게 연속 전송하지 않는다(권장: 0.2초 간격)
         self.subscribe_interval_sec = float(monitor.get("ws_subscribe_interval_sec", 0.2))
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
@@ -83,10 +84,14 @@ class KISWebSocketClient:
         self.state.mark_unsubscribed(code)
 
     async def set_targets(self, targets: Set[str]):
-        self.target_subs = set(targets)
+        # Hard cap per websocket session.
+        # Keep currently subscribed symbols first to reduce churn on each rebalance.
+        ordered = sorted(set(targets), key=lambda code: (code not in self.state.current_subs, code))
+        capped = ordered[: max(1, self.max_ws_subs)]
+        self.target_subs = set(capped)
         current = set(self.state.current_subs)
-        to_add = targets - current
-        to_remove = current - targets
+        to_add = self.target_subs - current
+        to_remove = current - self.target_subs
         for code in sorted(to_remove):
             await self._action_q.put(("unsubscribe", code))
         for code in sorted(to_add):

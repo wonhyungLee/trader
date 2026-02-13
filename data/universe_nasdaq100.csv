@@ -1,0 +1,101 @@
+code,name,market,excd
+ADBE,Adobe Inc.,NASDAQ,NAS
+AMD,Advanced Micro Devices,NASDAQ,NAS
+ABNB,Airbnb,NASDAQ,NAS
+ALNY,Alnylam Pharmaceuticals,NASDAQ,NAS
+GOOGL,Alphabet Inc. (Class A),NASDAQ,NAS
+GOOG,Alphabet Inc. (Class C),NASDAQ,NAS
+AMZN,Amazon,NASDAQ,NAS
+AEP,American Electric Power,NASDAQ,NAS
+AMGN,Amgen,NASDAQ,NAS
+ADI,Analog Devices,NASDAQ,NAS
+AAPL,Apple Inc.,NASDAQ,NAS
+AMAT,Applied Materials,NASDAQ,NAS
+APP,AppLovin,NASDAQ,NAS
+ARM,Arm Holdings,NASDAQ,NAS
+ASML,ASML Holding,NASDAQ,NAS
+TEAM,Atlassian,NASDAQ,NAS
+ADSK,Autodesk,NASDAQ,NAS
+ADP,Automatic Data Processing,NASDAQ,NAS
+AXON,Axon Enterprise,NASDAQ,NAS
+BKR,Baker Hughes,NASDAQ,NAS
+BKNG,Booking Holdings,NASDAQ,NAS
+AVGO,Broadcom,NASDAQ,NAS
+CDNS,Cadence Design Systems,NASDAQ,NAS
+CHTR,Charter Communications,NASDAQ,NAS
+CTAS,Cintas,NASDAQ,NAS
+CSCO,Cisco,NASDAQ,NAS
+CCEP,Coca-Cola Europacific Partners,NASDAQ,NAS
+CTSH,Cognizant,NASDAQ,NAS
+CMCSA,Comcast,NASDAQ,NAS
+CEG,Constellation Energy,NASDAQ,NAS
+CPRT,Copart,NASDAQ,NAS
+CSGP,CoStar Group,NASDAQ,NAS
+COST,Costco,NASDAQ,NAS
+CRWD,CrowdStrike,NASDAQ,NAS
+CSX,CSX Corporation,NASDAQ,NAS
+DDOG,Datadog,NASDAQ,NAS
+DXCM,DexCom,NASDAQ,NAS
+FANG,Diamondback Energy,NASDAQ,NAS
+DASH,DoorDash,NASDAQ,NAS
+EA,Electronic Arts,NASDAQ,NAS
+EXC,Exelon,NASDAQ,NAS
+FAST,Fastenal,NASDAQ,NAS
+FER,Ferrovial,NASDAQ,NAS
+FTNT,Fortinet,NASDAQ,NAS
+GEHC,GE HealthCare,NASDAQ,NAS
+GILD,Gilead Sciences,NASDAQ,NAS
+HON,Honeywell,NASDAQ,NAS
+IDXX,Idexx Laboratories,NASDAQ,NAS
+INSM,Insmed Incorporated,NASDAQ,NAS
+INTC,Intel,NASDAQ,NAS
+INTU,Intuit,NASDAQ,NAS
+ISRG,Intuitive Surgical,NASDAQ,NAS
+KDP,Keurig Dr Pepper,NASDAQ,NAS
+KLAC,KLA Corporation,NASDAQ,NAS
+KHC,Kraft Heinz,NASDAQ,NAS
+LRCX,Lam Research,NASDAQ,NAS
+LIN,Linde plc,NASDAQ,NAS
+MAR,Marriott International,NASDAQ,NAS
+MRVL,Marvell Technology,NASDAQ,NAS
+MELI,Mercado Libre,NASDAQ,NAS
+META,Meta Platforms,NASDAQ,NAS
+MCHP,Microchip Technology,NASDAQ,NAS
+MU,Micron Technology,NASDAQ,NAS
+MSFT,Microsoft,NASDAQ,NAS
+MSTR,MicroStrategy,NASDAQ,NAS
+MDLZ,Mondelez International,NASDAQ,NAS
+MPWR,Monolithic Power Systems,NASDAQ,NAS
+MNST,Monster Beverage,NASDAQ,NAS
+NFLX,"Netflix, Inc.",NASDAQ,NAS
+NVDA,Nvidia,NASDAQ,NAS
+NXPI,NXP Semiconductors,NASDAQ,NAS
+ORLY,O'Reilly Automotive,NASDAQ,NAS
+ODFL,Old Dominion Freight Line,NASDAQ,NAS
+PCAR,Paccar,NASDAQ,NAS
+PLTR,Palantir Technologies,NASDAQ,NAS
+PANW,Palo Alto Networks,NASDAQ,NAS
+PAYX,Paychex,NASDAQ,NAS
+PYPL,PayPal,NASDAQ,NAS
+PDD,PDD Holdings,NASDAQ,NAS
+PEP,PepsiCo,NASDAQ,NAS
+QCOM,Qualcomm,NASDAQ,NAS
+REGN,Regeneron Pharmaceuticals,NASDAQ,NAS
+ROP,Roper Technologies,NASDAQ,NAS
+ROST,Ross Stores,NASDAQ,NAS
+STX,Seagate Technology,NASDAQ,NAS
+SHOP,Shopify,NASDAQ,NAS
+SBUX,Starbucks,NASDAQ,NAS
+SNPS,Synopsys,NASDAQ,NAS
+TMUS,T-Mobile US,NASDAQ,NAS
+TTWO,Take-Two Interactive,NASDAQ,NAS
+TSLA,"Tesla, Inc.",NASDAQ,NAS
+TXN,Texas Instruments,NASDAQ,NAS
+TRI,Thomson Reuters,NASDAQ,NAS
+VRSK,Verisk Analytics,NASDAQ,NAS
+VRTX,Vertex Pharmaceuticals,NASDAQ,NAS
+WMT,Walmart,NASDAQ,NAS
+WBD,Warner Bros. Discovery,NASDAQ,NAS
+WDC,Western Digital,NASDAQ,NAS
+WDAY,"Workday, Inc.",NASDAQ,NAS
+XEL,Xcel Energy,NASDAQ,NAS

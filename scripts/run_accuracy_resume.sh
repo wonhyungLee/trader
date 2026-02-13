@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd /home/ubuntu/종목선별매매프로그램
-source .venv/bin/activate
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "$ROOT" ]; then
+  ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+cd "$ROOT"
 export PYTHONUNBUFFERED=1
-# Resume from accuracy_progress.json automatically
-python -u -m src.collectors.accuracy_data_loader \
-  --resume \
-  --notify-every 5
+
+echo "run_accuracy_resume.sh is deprecated in Viewer-US mode."
+echo "Use ./scripts/diagnose_viewer.py for health checks."
+exit 1

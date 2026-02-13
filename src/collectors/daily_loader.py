@@ -1,4 +1,4 @@
-"""일일 증분 수집 (KIS)."""
+"""일일 증분 수집 (KIS 해외주식)."""
 
 import argparse
 import logging
@@ -10,12 +10,12 @@ from src.storage.sqlite_store import SQLiteStore
 from src.utils.config import load_settings
 from src.utils.db_exporter import maybe_export_db
 from src.collectors.kis_price_client import KISPriceClient
-from src.collectors.refill_loader import _parse_kis_daily
+from src.collectors.refill_loader import _parse_overseas_daily
 
 
-def fetch_prices_kis(client: KISPriceClient, code: str, start: str, end: str) -> pd.DataFrame:
-    res = client.get_daily_prices(code, start.replace("-", ""), end.replace("-", ""))
-    return _parse_kis_daily(res)
+def fetch_prices_kis_overseas(client: KISPriceClient, excd: str, code: str, end: str) -> pd.DataFrame:
+    res = client.get_overseas_daily_prices(excd, code, end.replace("-", ""))
+    return _parse_overseas_daily(res)
 
 def _sleep_on_error(exc: Exception, settings: dict) -> None:
     msg = str(exc)
@@ -40,6 +40,9 @@ def main(limit: int | None = None, chunk_days: int = 90):
         raise SystemExit("universe_members is empty. Run universe_loader first.")
     if limit:
         codes = codes[:limit]
+    excd_map = store.list_universe_excd_map()
+    universe_df = store.load_universe_df()
+    group_map = {row["code"]: row.get("group_name") for _, row in universe_df.iterrows()}
     today = datetime.today().date()
     errors = 0
     for code in codes:
@@ -52,25 +55,31 @@ def main(limit: int | None = None, chunk_days: int = 90):
             if start_dt > today:
                 continue
 
-            # forward chunk
-            cur_start = start_dt
-            while cur_start <= today:
-                cur_end = min(cur_start + timedelta(days=chunk_days), today)
+            group = str(group_map.get(code, "")).upper()
+            excd = excd_map.get(code) or ("NAS" if "NASDAQ" in group else "NYS")
+
+            # backward from today, keep rows after last date
+            cur_end = today
+            while cur_end >= start_dt:
                 try:
-                    df = fetch_prices_kis(client, code, cur_start.strftime("%Y-%m-%d"), cur_end.strftime("%Y-%m-%d"))
+                    df_all = fetch_prices_kis_overseas(client, excd, code, cur_end.strftime("%Y-%m-%d"))
                 except Exception as exc:
                     errors += 1
                     logging.warning("daily_loader fetch failed %s: %s", code, exc)
                     _sleep_on_error(exc, settings)
                     break
-                if df.empty:
+                if df_all.empty:
                     break
-                store.upsert_daily_prices(code, df)
-                max_date = df["date"].max()
-                next_start = datetime.strptime(max_date, "%Y-%m-%d").date() + timedelta(days=1)
-                if next_start <= cur_start:
+                df = df_all[df_all["date"] >= start_dt.strftime("%Y-%m-%d")]
+                if not df.empty:
+                    store.upsert_daily_prices(code, df)
+                min_date_str = df_all["date"].min()
+                if not min_date_str:
                     break
-                cur_start = next_start
+                next_end = datetime.strptime(min_date_str, "%Y-%m-%d").date() - timedelta(days=1)
+                if next_end >= cur_end:
+                    break
+                cur_end = next_end
         except Exception as exc:
             errors += 1
             logging.exception("daily_loader failed for %s", code)

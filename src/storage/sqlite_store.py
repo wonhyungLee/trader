@@ -5,11 +5,45 @@ import pandas as pd
 from typing import List, Dict, Any, Optional, Iterable
 from datetime import datetime, timedelta
 
+
+# --- code normalization (KR numeric codes / US tickers) ---
+
+def normalize_code(value) -> str:
+    """Normalize codes across markets.
+
+    - KR: numeric 6-digit code (zero-padded)
+    - US: ticker symbol (uppercase, no padding)
+    """
+    if value is None:
+        return ''
+    s = str(value).strip()
+    if not s:
+        return ''
+    s = s.upper()
+    return s.zfill(6) if s.isdigit() else s
+
+
+def normalize_optional_text(value) -> Optional[str]:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.lower() in {"nan", "none", "null", "na", "n/a"}:
+        return None
+    return text
+
 SCHEMA = {
     "universe_members": """
         CREATE TABLE IF NOT EXISTS universe_members (
             code TEXT PRIMARY KEY,
             market TEXT,
+            excd TEXT,
             name TEXT,
             group_name TEXT,
             updated_at TEXT
@@ -21,6 +55,18 @@ SCHEMA = {
             name TEXT,
             market TEXT,
             marcap REAL,
+            updated_at TEXT
+        );
+    """,
+    "ovrs_stock_info": """
+        CREATE TABLE IF NOT EXISTS ovrs_stock_info (
+            code TEXT PRIMARY KEY,
+            excd TEXT,
+            prdt_type_cd TEXT,
+            listed_date TEXT,
+            exchange_name TEXT,
+            currency TEXT,
+            country TEXT,
             updated_at TEXT
         );
     """,
@@ -197,8 +243,13 @@ class SQLiteStore:
     def __init__(self, db_path: str = "data/market_data.db"):
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self.db_path = db_path
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self.conn = sqlite3.connect(self.db_path, timeout=5, check_same_thread=False)
         self.conn.execute("PRAGMA journal_mode=WAL;")
+        try:
+            self.conn.execute("PRAGMA synchronous=NORMAL;")
+            self.conn.execute("PRAGMA busy_timeout=5000;")
+        except Exception:
+            pass
         self.conn.row_factory = sqlite3.Row
         self._refill_cols: Optional[set[str]] = None
         self.ensure_schema()
@@ -208,6 +259,7 @@ class SQLiteStore:
         for ddl in SCHEMA.values():
             cur.execute(ddl)
         self._ensure_refill_progress_columns()
+        self._ensure_universe_columns()
         for idx in INDEXES:
             try:
                 cur.execute(idx)
@@ -229,13 +281,22 @@ class SQLiteStore:
         except Exception:
             pass
 
+    def _ensure_universe_columns(self):
+        try:
+            cur = self.conn.execute("PRAGMA table_info(universe_members)")
+            cols = {row[1] for row in cur.fetchall()}
+            if "excd" not in cols:
+                self.conn.execute("ALTER TABLE universe_members ADD COLUMN excd TEXT")
+        except Exception:
+            pass
+
     # ---------- universe_members ----------
     def upsert_universe_members(self, rows: Iterable[Dict[str, Any]]):
         now = datetime.utcnow().isoformat()
         data = []
         codes = []
         for r in rows:
-            code = str(r.get("code") or "").zfill(6)
+            code = normalize_code(r.get("code"))
             if not code:
                 continue
             codes.append(code)
@@ -243,6 +304,7 @@ class SQLiteStore:
                 (
                     code,
                     r.get("market"),
+                    r.get("excd"),
                     r.get("name"),
                     r.get("group_name"),
                     now,
@@ -250,10 +312,11 @@ class SQLiteStore:
             )
         self.conn.executemany(
             """
-            INSERT INTO universe_members(code, market, name, group_name, updated_at)
-            VALUES(?,?,?,?,?)
+            INSERT INTO universe_members(code, market, excd, name, group_name, updated_at)
+            VALUES(?,?,?,?,?,?)
             ON CONFLICT(code) DO UPDATE SET
                 market=excluded.market,
+                excd=excluded.excd,
                 name=excluded.name,
                 group_name=excluded.group_name,
                 updated_at=excluded.updated_at;
@@ -271,8 +334,12 @@ class SQLiteStore:
         return rows
 
     def load_universe_df(self) -> pd.DataFrame:
-        cur = self.conn.execute("SELECT code, name, market, group_name FROM universe_members ORDER BY code")
+        cur = self.conn.execute("SELECT code, name, market, excd, group_name FROM universe_members ORDER BY code")
         return pd.DataFrame(cur.fetchall(), columns=[c[0] for c in cur.description])
+
+    def list_universe_excd_map(self) -> Dict[str, Optional[str]]:
+        cur = self.conn.execute("SELECT code, excd FROM universe_members")
+        return {row[0]: row[1] for row in cur.fetchall()}
 
     # ---------- stock_info ----------
     def upsert_stock_info(self, rows: Iterable[Dict[str, Any]]):
@@ -302,6 +369,40 @@ class SQLiteStore:
         )
         self.conn.commit()
 
+    # ---------- ovrs_stock_info ----------
+    def upsert_ovrs_stock_info(self, rows: Iterable[Dict[str, Any]]):
+        now = datetime.utcnow().isoformat()
+        data = []
+        for r in rows:
+            data.append(
+                (
+                    r.get("code"),
+                    r.get("excd"),
+                    r.get("prdt_type_cd"),
+                    r.get("listed_date"),
+                    r.get("exchange_name"),
+                    r.get("currency"),
+                    r.get("country"),
+                    now,
+                )
+            )
+        self.conn.executemany(
+            """
+            INSERT INTO ovrs_stock_info(code, excd, prdt_type_cd, listed_date, exchange_name, currency, country, updated_at)
+            VALUES(?,?,?,?,?,?,?,?)
+            ON CONFLICT(code) DO UPDATE SET
+                excd=excluded.excd,
+                prdt_type_cd=excluded.prdt_type_cd,
+                listed_date=excluded.listed_date,
+                exchange_name=excluded.exchange_name,
+                currency=excluded.currency,
+                country=excluded.country,
+                updated_at=excluded.updated_at;
+            """,
+            data,
+        )
+        self.conn.commit()
+
     def list_stock_codes(self) -> List[str]:
         return self.list_universe_codes()
 
@@ -310,18 +411,18 @@ class SQLiteStore:
         now = datetime.utcnow().isoformat()
         data = []
         for r in rows:
-            code = str(r.get("code") or "").zfill(6)
+            code = normalize_code(r.get("code"))
             if not code:
                 continue
             data.append(
                 (
                     code,
-                    r.get("sector_code"),
-                    r.get("sector_name"),
-                    r.get("industry_code"),
-                    r.get("industry_name"),
+                    normalize_optional_text(r.get("sector_code")),
+                    normalize_optional_text(r.get("sector_name")),
+                    normalize_optional_text(r.get("industry_code")),
+                    normalize_optional_text(r.get("industry_name")),
                     r.get("updated_at") or now,
-                    r.get("source"),
+                    normalize_optional_text(r.get("source")),
                 )
             )
         if not data:
@@ -361,7 +462,13 @@ class SQLiteStore:
 
     def list_sector_unknowns(self) -> List[str]:
         cur = self.conn.execute(
-            "SELECT u.code FROM universe_members u LEFT JOIN sector_map s ON u.code=s.code WHERE s.sector_name IS NULL"
+            """
+            SELECT u.code
+            FROM universe_members u
+            LEFT JOIN sector_map s ON u.code=s.code
+            WHERE s.sector_name IS NULL
+               OR lower(trim(coalesce(s.sector_name,''))) IN ('', 'nan', 'none', 'null', 'na', 'n/a', 'unknown')
+            """
         )
         return [row[0] for row in cur.fetchall()]
 
@@ -385,7 +492,7 @@ class SQLiteStore:
         data = []
         codes = []
         for r in rows:
-            code = str(r.get("code") or "").zfill(6)
+            code = normalize_code(r.get("code"))
             if not code:
                 continue
             codes.append(code)

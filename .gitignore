@@ -20,3 +20,11 @@ dist/
 myenv/
 data/*.lock
 data/*.json
+
+# Generated data exports / caches (keep out of git)
+data/csv/
+data/cache/
+data/universe_sectors/
+
+# Large binary docs (keep local)
+docs/*.xlsx

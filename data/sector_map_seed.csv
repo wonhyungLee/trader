@@ -1,0 +1,514 @@
+code,sector_name,industry_name,source
+MMM,Industrials,Industrial Conglomerates,WIKI_SP500
+AOS,Industrials,Building Products,WIKI_SP500
+ABT,Health Care,Health Care Equipment,WIKI_SP500
+ABBV,Health Care,Biotechnology,WIKI_SP500
+ACN,Information Technology,IT Consulting & Other Services,WIKI_SP500
+ADBE,Information Technology,Application Software,WIKI_SP500
+AMD,Information Technology,Semiconductors,WIKI_SP500
+AES,Utilities,Independent Power Producers & Energy Traders,WIKI_SP500
+AFL,Financials,Life & Health Insurance,WIKI_SP500
+A,Health Care,Life Sciences Tools & Services,WIKI_SP500
+APD,Materials,Industrial Gases,WIKI_SP500
+ABNB,Consumer Discretionary,"Hotels, Resorts & Cruise Lines",WIKI_SP500
+AKAM,Information Technology,Internet Services & Infrastructure,WIKI_SP500
+ALB,Materials,Specialty Chemicals,WIKI_SP500
+ARE,Real Estate,Office REITs,WIKI_SP500
+ALGN,Health Care,Health Care Supplies,WIKI_SP500
+ALLE,Industrials,Building Products,WIKI_SP500
+LNT,Utilities,Electric Utilities,WIKI_SP500
+ALL,Financials,Property & Casualty Insurance,WIKI_SP500
+GOOGL,Communication Services,Interactive Media & Services,WIKI_SP500
+GOOG,Communication Services,Interactive Media & Services,WIKI_SP500
+MO,Consumer Staples,Tobacco,WIKI_SP500
+AMZN,Consumer Discretionary,Broadline Retail,WIKI_SP500
+AMCR,Materials,Paper & Plastic Packaging Products & Materials,WIKI_SP500
+AEE,Utilities,Multi-Utilities,WIKI_SP500
+AEP,Utilities,Electric Utilities,WIKI_SP500
+AXP,Financials,Consumer Finance,WIKI_SP500
+AIG,Financials,Multi-line Insurance,WIKI_SP500
+AMT,Real Estate,Telecom Tower REITs,WIKI_SP500
+AWK,Utilities,Water Utilities,WIKI_SP500
+AMP,Financials,Asset Management & Custody Banks,WIKI_SP500
+AME,Industrials,Electrical Components & Equipment,WIKI_SP500
+AMGN,Health Care,Biotechnology,WIKI_SP500
+APH,Information Technology,Electronic Components,WIKI_SP500
+ADI,Information Technology,Semiconductors,WIKI_SP500
+AON,Financials,Insurance Brokers,WIKI_SP500
+APA,Energy,Oil & Gas Exploration & Production,WIKI_SP500
+APO,Financials,Asset Management & Custody Banks,WIKI_SP500
+AAPL,Information Technology,"Technology Hardware, Storage & Peripherals",WIKI_SP500
+AMAT,Information Technology,Semiconductor Materials & Equipment,WIKI_SP500
+APP,Information Technology,Application Software,WIKI_SP500
+APTV,Consumer Discretionary,Automotive Parts & Equipment,WIKI_SP500
+ACGL,Financials,Property & Casualty Insurance,WIKI_SP500
+ADM,Consumer Staples,Agricultural Products & Services,WIKI_SP500
+ARES,Financials,Asset Management & Custody Banks,WIKI_SP500
+ANET,Information Technology,Communications Equipment,WIKI_SP500
+AJG,Financials,Insurance Brokers,WIKI_SP500
+AIZ,Financials,Multi-line Insurance,WIKI_SP500
+T,Communication Services,Integrated Telecommunication Services,WIKI_SP500
+ATO,Utilities,Gas Utilities,WIKI_SP500
+ADSK,Information Technology,Application Software,WIKI_SP500
+ADP,Industrials,Human Resource & Employment Services,WIKI_SP500
+AZO,Consumer Discretionary,Automotive Retail,WIKI_SP500
+AVB,Real Estate,Multi-Family Residential REITs,WIKI_SP500
+AVY,Materials,Paper & Plastic Packaging Products & Materials,WIKI_SP500
+AXON,Industrials,Aerospace & Defense,WIKI_SP500
+BKR,Energy,Oil & Gas Equipment & Services,WIKI_SP500
+BALL,Materials,"Metal, Glass & Plastic Containers",WIKI_SP500
+BAC,Financials,Diversified Banks,WIKI_SP500
+BAX,Health Care,Health Care Equipment,WIKI_SP500
+BDX,Health Care,Health Care Equipment,WIKI_SP500
+BRK.B,Financials,Multi-Sector Holdings,WIKI_SP500
+BBY,Consumer Discretionary,Computer & Electronics Retail,WIKI_SP500
+TECH,Health Care,Life Sciences Tools & Services,WIKI_SP500
+BIIB,Health Care,Biotechnology,WIKI_SP500
+BLK,Financials,Asset Management & Custody Banks,WIKI_SP500
+BX,Financials,Asset Management & Custody Banks,WIKI_SP500
+XYZ,Financials,Transaction & Payment Processing Services,WIKI_SP500
+BK,Financials,Asset Management & Custody Banks,WIKI_SP500
+BA,Industrials,Aerospace & Defense,WIKI_SP500
+BKNG,Consumer Discretionary,"Hotels, Resorts & Cruise Lines",WIKI_SP500
+BSX,Health Care,Health Care Equipment,WIKI_SP500
+BMY,Health Care,Pharmaceuticals,WIKI_SP500
+AVGO,Information Technology,Semiconductors,WIKI_SP500
+BR,Industrials,Data Processing & Outsourced Services,WIKI_SP500
+BRO,Financials,Insurance Brokers,WIKI_SP500
+BF.B,Consumer Staples,Distillers & Vintners,WIKI_SP500
+BLDR,Industrials,Building Products,WIKI_SP500
+BG,Consumer Staples,Agricultural Products & Services,WIKI_SP500
+BXP,Real Estate,Office REITs,WIKI_SP500
+CHRW,Industrials,Air Freight & Logistics,WIKI_SP500
+CDNS,Information Technology,Application Software,WIKI_SP500
+CPT,Real Estate,Multi-Family Residential REITs,WIKI_SP500
+CPB,Consumer Staples,Packaged Foods & Meats,WIKI_SP500
+COF,Financials,Consumer Finance,WIKI_SP500
+CAH,Health Care,Health Care Distributors,WIKI_SP500
+CCL,Consumer Discretionary,"Hotels, Resorts & Cruise Lines",WIKI_SP500
+CARR,Industrials,Building Products,WIKI_SP500
+CVNA,Consumer Discretionary,Automotive Retail,WIKI_SP500
+CAT,Industrials,Construction Machinery & Heavy Transportation Equipment,WIKI_SP500
+CBOE,Financials,Financial Exchanges & Data,WIKI_SP500
+CBRE,Real Estate,Real Estate Services,WIKI_SP500
+CDW,Information Technology,Technology Distributors,WIKI_SP500
+COR,Health Care,Health Care Distributors,WIKI_SP500
+CNC,Health Care,Managed Health Care,WIKI_SP500
+CNP,Utilities,Multi-Utilities,WIKI_SP500
+CF,Materials,Fertilizers & Agricultural Chemicals,WIKI_SP500
+CRL,Health Care,Life Sciences Tools & Services,WIKI_SP500
+SCHW,Financials,Investment Banking & Brokerage,WIKI_SP500
+CHTR,Communication Services,Cable & Satellite,WIKI_SP500
+CVX,Energy,Integrated Oil & Gas,WIKI_SP500
+CMG,Consumer Discretionary,Restaurants,WIKI_SP500
+CB,Financials,Property & Casualty Insurance,WIKI_SP500
+CHD,Consumer Staples,Household Products,WIKI_SP500
+CIEN,Information Technology,Communications Equipment,WIKI_SP500
+CI,Health Care,Health Care Services,WIKI_SP500
+CINF,Financials,Property & Casualty Insurance,WIKI_SP500
+CTAS,Industrials,Diversified Support Services,WIKI_SP500
+CSCO,Information Technology,Communications Equipment,WIKI_SP500
+C,Financials,Diversified Banks,WIKI_SP500
+CFG,Financials,Regional Banks,WIKI_SP500
+CLX,Consumer Staples,Household Products,WIKI_SP500
+CME,Financials,Financial Exchanges & Data,WIKI_SP500
+CMS,Utilities,Multi-Utilities,WIKI_SP500
+KO,Consumer Staples,Soft Drinks & Non-alcoholic Beverages,WIKI_SP500
+CTSH,Information Technology,IT Consulting & Other Services,WIKI_SP500
+COIN,Financials,Financial Exchanges & Data,WIKI_SP500
+CL,Consumer Staples,Household Products,WIKI_SP500
+CMCSA,Communication Services,Cable & Satellite,WIKI_SP500
+FIX,Industrials,Construction & Engineering,WIKI_SP500
+CAG,Consumer Staples,Packaged Foods & Meats,WIKI_SP500
+COP,Energy,Oil & Gas Exploration & Production,WIKI_SP500
+ED,Utilities,Multi-Utilities,WIKI_SP500
+STZ,Consumer Staples,Distillers & Vintners,WIKI_SP500
+CEG,Utilities,Electric Utilities,WIKI_SP500
+COO,Health Care,Health Care Supplies,WIKI_SP500
+CPRT,Industrials,Diversified Support Services,WIKI_SP500
+GLW,Information Technology,Electronic Components,WIKI_SP500
+CPAY,Financials,Transaction & Payment Processing Services,WIKI_SP500
+CTVA,Materials,Fertilizers & Agricultural Chemicals,WIKI_SP500
+CSGP,Real Estate,Real Estate Services,WIKI_SP500
+COST,Consumer Staples,Consumer Staples Merchandise Retail,WIKI_SP500
+CTRA,Energy,Oil & Gas Exploration & Production,WIKI_SP500
+CRH,Materials,Construction Materials,WIKI_SP500
+CRWD,Information Technology,Systems Software,WIKI_SP500
+CCI,Real Estate,Telecom Tower REITs,WIKI_SP500
+CSX,Industrials,Rail Transportation,WIKI_SP500
+CMI,Industrials,Construction Machinery & Heavy Transportation Equipment,WIKI_SP500
+CVS,Health Care,Health Care Services,WIKI_SP500
+DHR,Health Care,Life Sciences Tools & Services,WIKI_SP500
+DRI,Consumer Discretionary,Restaurants,WIKI_SP500
+DDOG,Information Technology,Application Software,WIKI_SP500
+DVA,Health Care,Health Care Services,WIKI_SP500
+DECK,Consumer Discretionary,Footwear,WIKI_SP500
+DE,Industrials,Agricultural & Farm Machinery,WIKI_SP500
+DELL,Information Technology,"Technology Hardware, Storage & Peripherals",WIKI_SP500
+DAL,Industrials,Passenger Airlines,WIKI_SP500
+DVN,Energy,Oil & Gas Exploration & Production,WIKI_SP500
+DXCM,Health Care,Health Care Equipment,WIKI_SP500
+FANG,Energy,Oil & Gas Exploration & Production,WIKI_SP500
+DLR,Real Estate,Data Center REITs,WIKI_SP500
+DG,Consumer Staples,Consumer Staples Merchandise Retail,WIKI_SP500
+DLTR,Consumer Staples,Consumer Staples Merchandise Retail,WIKI_SP500
+D,Utilities,Multi-Utilities,WIKI_SP500
+DPZ,Consumer Discretionary,Restaurants,WIKI_SP500
+DASH,Consumer Discretionary,Specialized Consumer Services,WIKI_SP500
+DOV,Industrials,Industrial Machinery & Supplies & Components,WIKI_SP500
+DOW,Materials,Commodity Chemicals,WIKI_SP500
+DHI,Consumer Discretionary,Homebuilding,WIKI_SP500
+DTE,Utilities,Multi-Utilities,WIKI_SP500
+DUK,Utilities,Electric Utilities,WIKI_SP500
+DD,Materials,Specialty Chemicals,WIKI_SP500
+ETN,Industrials,Electrical Components & Equipment,WIKI_SP500
+EBAY,Consumer Discretionary,Broadline Retail,WIKI_SP500
+ECL,Materials,Specialty Chemicals,WIKI_SP500
+EIX,Utilities,Electric Utilities,WIKI_SP500
+EW,Health Care,Health Care Equipment,WIKI_SP500
+EA,Communication Services,Interactive Home Entertainment,WIKI_SP500
+ELV,Health Care,Managed Health Care,WIKI_SP500
+EME,Industrials,Construction & Engineering,WIKI_SP500
+EMR,Industrials,Electrical Components & Equipment,WIKI_SP500
+ETR,Utilities,Electric Utilities,WIKI_SP500
+EOG,Energy,Oil & Gas Exploration & Production,WIKI_SP500
+EPAM,Information Technology,IT Consulting & Other Services,WIKI_SP500
+EQT,Energy,Oil & Gas Exploration & Production,WIKI_SP500
+EFX,Industrials,Research & Consulting Services,WIKI_SP500
+EQIX,Real Estate,Data Center REITs,WIKI_SP500
+EQR,Real Estate,Multi-Family Residential REITs,WIKI_SP500
+ERIE,Financials,Insurance Brokers,WIKI_SP500
+ESS,Real Estate,Multi-Family Residential REITs,WIKI_SP500
+EL,Consumer Staples,Personal Care Products,WIKI_SP500
+EG,Financials,Reinsurance,WIKI_SP500
+EVRG,Utilities,Electric Utilities,WIKI_SP500
+ES,Utilities,Electric Utilities,WIKI_SP500
+EXC,Utilities,Electric Utilities,WIKI_SP500
+EXE,Energy,Oil & Gas Exploration & Production,WIKI_SP500
+EXPE,Consumer Discretionary,"Hotels, Resorts & Cruise Lines",WIKI_SP500
+EXPD,Industrials,Air Freight & Logistics,WIKI_SP500
+EXR,Real Estate,Self-Storage REITs,WIKI_SP500
+XOM,Energy,Integrated Oil & Gas,WIKI_SP500
+FFIV,Information Technology,Communications Equipment,WIKI_SP500
+FDS,Financials,Financial Exchanges & Data,WIKI_SP500
+FICO,Information Technology,Application Software,WIKI_SP500
+FAST,Industrials,Trading Companies & Distributors,WIKI_SP500
+FRT,Real Estate,Retail REITs,WIKI_SP500
+FDX,Industrials,Air Freight & Logistics,WIKI_SP500
+FIS,Financials,Transaction & Payment Processing Services,WIKI_SP500
+FITB,Financials,Regional Banks,WIKI_SP500
+FSLR,Information Technology,Semiconductors,WIKI_SP500
+FE,Utilities,Electric Utilities,WIKI_SP500
+FISV,Financials,Transaction & Payment Processing Services,WIKI_SP500
+F,Consumer Discretionary,Automobile Manufacturers,WIKI_SP500
+FTNT,Information Technology,Systems Software,WIKI_SP500
+FTV,Industrials,Industrial Machinery & Supplies & Components,WIKI_SP500
+FOXA,Communication Services,Broadcasting,WIKI_SP500
+FOX,Communication Services,Broadcasting,WIKI_SP500
+BEN,Financials,Asset Management & Custody Banks,WIKI_SP500
+FCX,Materials,Copper,WIKI_SP500
+GRMN,Consumer Discretionary,Consumer Electronics,WIKI_SP500
+IT,Information Technology,IT Consulting & Other Services,WIKI_SP500
+GE,Industrials,Aerospace & Defense,WIKI_SP500
+GEHC,Health Care,Health Care Equipment,WIKI_SP500
+GEV,Industrials,Heavy Electrical Equipment,WIKI_SP500
+GEN,Information Technology,Systems Software,WIKI_SP500
+GNRC,Industrials,Electrical Components & Equipment,WIKI_SP500
+GD,Industrials,Aerospace & Defense,WIKI_SP500
+GIS,Consumer Staples,Packaged Foods & Meats,WIKI_SP500
+GM,Consumer Discretionary,Automobile Manufacturers,WIKI_SP500
+GPC,Consumer Discretionary,Distributors,WIKI_SP500
+GILD,Health Care,Biotechnology,WIKI_SP500
+GPN,Financials,Transaction & Payment Processing Services,WIKI_SP500
+GL,Financials,Life & Health Insurance,WIKI_SP500
+GDDY,Information Technology,Internet Services & Infrastructure,WIKI_SP500
+GS,Financials,Investment Banking & Brokerage,WIKI_SP500
+HAL,Energy,Oil & Gas Equipment & Services,WIKI_SP500
+HIG,Financials,Property & Casualty Insurance,WIKI_SP500
+HAS,Consumer Discretionary,Leisure Products,WIKI_SP500
+HCA,Health Care,Health Care Facilities,WIKI_SP500
+DOC,Real Estate,Health Care REITs,WIKI_SP500
+HSIC,Health Care,Health Care Distributors,WIKI_SP500
+HSY,Consumer Staples,Packaged Foods & Meats,WIKI_SP500
+HPE,Information Technology,"Technology Hardware, Storage & Peripherals",WIKI_SP500
+HLT,Consumer Discretionary,"Hotels, Resorts & Cruise Lines",WIKI_SP500
+HOLX,Health Care,Health Care Equipment,WIKI_SP500
+HD,Consumer Discretionary,Home Improvement Retail,WIKI_SP500
+HON,Industrials,Industrial Conglomerates,WIKI_SP500
+HRL,Consumer Staples,Packaged Foods & Meats,WIKI_SP500
+HST,Real Estate,Hotel & Resort REITs,WIKI_SP500
+HWM,Industrials,Aerospace & Defense,WIKI_SP500
+HPQ,Information Technology,"Technology Hardware, Storage & Peripherals",WIKI_SP500
+HUBB,Industrials,Industrial Machinery & Supplies & Components,WIKI_SP500
+HUM,Health Care,Managed Health Care,WIKI_SP500
+HBAN,Financials,Regional Banks,WIKI_SP500
+HII,Industrials,Aerospace & Defense,WIKI_SP500
+IBM,Information Technology,IT Consulting & Other Services,WIKI_SP500
+IEX,Industrials,Industrial Machinery & Supplies & Components,WIKI_SP500
+IDXX,Health Care,Health Care Equipment,WIKI_SP500
+ITW,Industrials,Industrial Machinery & Supplies & Components,WIKI_SP500
+INCY,Health Care,Biotechnology,WIKI_SP500
+IR,Industrials,Industrial Machinery & Supplies & Components,WIKI_SP500
+PODD,Health Care,Health Care Equipment,WIKI_SP500
+INTC,Information Technology,Semiconductors,WIKI_SP500
+IBKR,Financials,Investment Banking & Brokerage,WIKI_SP500
+ICE,Financials,Financial Exchanges & Data,WIKI_SP500
+IFF,Materials,Specialty Chemicals,WIKI_SP500
+IP,Materials,Paper & Plastic Packaging Products & Materials,WIKI_SP500
+INTU,Information Technology,Application Software,WIKI_SP500
+ISRG,Health Care,Health Care Equipment,WIKI_SP500
+IVZ,Financials,Asset Management & Custody Banks,WIKI_SP500
+INVH,Real Estate,Single-Family Residential REITs,WIKI_SP500
+IQV,Health Care,Life Sciences Tools & Services,WIKI_SP500
+IRM,Real Estate,Other Specialized REITs,WIKI_SP500
+JBHT,Industrials,Cargo Ground Transportation,WIKI_SP500
+JBL,Information Technology,Electronic Manufacturing Services,WIKI_SP500
+JKHY,Financials,Transaction & Payment Processing Services,WIKI_SP500
+J,Industrials,Construction & Engineering,WIKI_SP500
+JNJ,Health Care,Pharmaceuticals,WIKI_SP500
+JCI,Industrials,Building Products,WIKI_SP500
+JPM,Financials,Diversified Banks,WIKI_SP500
+KVUE,Consumer Staples,Personal Care Products,WIKI_SP500
+KDP,Consumer Staples,Soft Drinks & Non-alcoholic Beverages,WIKI_SP500
+KEY,Financials,Regional Banks,WIKI_SP500
+KEYS,Information Technology,Electronic Equipment & Instruments,WIKI_SP500
+KMB,Consumer Staples,Household Products,WIKI_SP500
+KIM,Real Estate,Retail REITs,WIKI_SP500
+KMI,Energy,Oil & Gas Storage & Transportation,WIKI_SP500
+KKR,Financials,Asset Management & Custody Banks,WIKI_SP500
+KLAC,Information Technology,Semiconductor Materials & Equipment,WIKI_SP500
+KHC,Consumer Staples,Packaged Foods & Meats,WIKI_SP500
+KR,Consumer Staples,Food Retail,WIKI_SP500
+LHX,Industrials,Aerospace & Defense,WIKI_SP500
+LH,Health Care,Health Care Services,WIKI_SP500
+LRCX,Information Technology,Semiconductor Materials & Equipment,WIKI_SP500
+LW,Consumer Staples,Packaged Foods & Meats,WIKI_SP500
+LVS,Consumer Discretionary,Casinos & Gaming,WIKI_SP500
+LDOS,Industrials,Diversified Support Services,WIKI_SP500
+LEN,Consumer Discretionary,Homebuilding,WIKI_SP500
+LII,Industrials,Building Products,WIKI_SP500
+LLY,Health Care,Pharmaceuticals,WIKI_SP500
+LIN,Materials,Industrial Gases,WIKI_SP500
+LYV,Communication Services,Movies & Entertainment,WIKI_SP500
+LMT,Industrials,Aerospace & Defense,WIKI_SP500
+L,Financials,Multi-line Insurance,WIKI_SP500
+LOW,Consumer Discretionary,Home Improvement Retail,WIKI_SP500
+LULU,Consumer Discretionary,"Apparel, Accessories & Luxury Goods",WIKI_SP500
+LYB,Materials,Specialty Chemicals,WIKI_SP500
+MTB,Financials,Regional Banks,WIKI_SP500
+MPC,Energy,Oil & Gas Refining & Marketing,WIKI_SP500
+MAR,Consumer Discretionary,"Hotels, Resorts & Cruise Lines",WIKI_SP500
+MRSH,Financials,Insurance Brokers,WIKI_SP500
+MLM,Materials,Construction Materials,WIKI_SP500
+MAS,Industrials,Building Products,WIKI_SP500
+MA,Financials,Transaction & Payment Processing Services,WIKI_SP500
+MTCH,Communication Services,Interactive Media & Services,WIKI_SP500
+MKC,Consumer Staples,Packaged Foods & Meats,WIKI_SP500
+MCD,Consumer Discretionary,Restaurants,WIKI_SP500
+MCK,Health Care,Health Care Distributors,WIKI_SP500
+MDT,Health Care,Health Care Equipment,WIKI_SP500
+MRK,Health Care,Pharmaceuticals,WIKI_SP500
+META,Communication Services,Interactive Media & Services,WIKI_SP500
+MET,Financials,Life & Health Insurance,WIKI_SP500
+MTD,Health Care,Life Sciences Tools & Services,WIKI_SP500
+MGM,Consumer Discretionary,Casinos & Gaming,WIKI_SP500
+MCHP,Information Technology,Semiconductors,WIKI_SP500
+MU,Information Technology,Semiconductors,WIKI_SP500
+MSFT,Information Technology,Systems Software,WIKI_SP500
+MAA,Real Estate,Multi-Family Residential REITs,WIKI_SP500
+MRNA,Health Care,Biotechnology,WIKI_SP500
+MOH,Health Care,Managed Health Care,WIKI_SP500
+TAP,Consumer Staples,Brewers,WIKI_SP500
+MDLZ,Consumer Staples,Packaged Foods & Meats,WIKI_SP500
+MPWR,Information Technology,Semiconductors,WIKI_SP500
+MNST,Consumer Staples,Soft Drinks & Non-alcoholic Beverages,WIKI_SP500
+MCO,Financials,Financial Exchanges & Data,WIKI_SP500
+MS,Financials,Investment Banking & Brokerage,WIKI_SP500
+MOS,Materials,Fertilizers & Agricultural Chemicals,WIKI_SP500
+MSI,Information Technology,Communications Equipment,WIKI_SP500
+MSCI,Financials,Financial Exchanges & Data,WIKI_SP500
+NDAQ,Financials,Financial Exchanges & Data,WIKI_SP500
+NTAP,Information Technology,"Technology Hardware, Storage & Peripherals",WIKI_SP500
+NFLX,Communication Services,Movies & Entertainment,WIKI_SP500
+NEM,Materials,Gold,WIKI_SP500
+NWSA,Communication Services,Publishing,WIKI_SP500
+NWS,Communication Services,Publishing,WIKI_SP500
+NEE,Utilities,Multi-Utilities,WIKI_SP500
+NKE,Consumer Discretionary,"Apparel, Accessories & Luxury Goods",WIKI_SP500
+NI,Utilities,Multi-Utilities,WIKI_SP500
+NDSN,Industrials,Industrial Machinery & Supplies & Components,WIKI_SP500
+NSC,Industrials,Rail Transportation,WIKI_SP500
+NTRS,Financials,Asset Management & Custody Banks,WIKI_SP500
+NOC,Industrials,Aerospace & Defense,WIKI_SP500
+NCLH,Consumer Discretionary,"Hotels, Resorts & Cruise Lines",WIKI_SP500
+NRG,Utilities,Independent Power Producers & Energy Traders,WIKI_SP500
+NUE,Materials,Steel,WIKI_SP500
+NVDA,Information Technology,Semiconductors,WIKI_SP500
+NVR,Consumer Discretionary,Homebuilding,WIKI_SP500
+NXPI,Information Technology,Semiconductors,WIKI_SP500
+ORLY,Consumer Discretionary,Automotive Retail,WIKI_SP500
+OXY,Energy,Oil & Gas Exploration & Production,WIKI_SP500
+ODFL,Industrials,Cargo Ground Transportation,WIKI_SP500
+OMC,Communication Services,Advertising,WIKI_SP500
+ON,Information Technology,Semiconductors,WIKI_SP500
+OKE,Energy,Oil & Gas Storage & Transportation,WIKI_SP500
+ORCL,Information Technology,Application Software,WIKI_SP500
+OTIS,Industrials,Industrial Machinery & Supplies & Components,WIKI_SP500
+PCAR,Industrials,Construction Machinery & Heavy Transportation Equipment,WIKI_SP500
+PKG,Materials,Paper & Plastic Packaging Products & Materials,WIKI_SP500
+PLTR,Information Technology,Application Software,WIKI_SP500
+PANW,Information Technology,Systems Software,WIKI_SP500
+PSKY,Communication Services,Movies & Entertainment,WIKI_SP500
+PH,Industrials,Industrial Machinery & Supplies & Components,WIKI_SP500
+PAYX,Industrials,Human Resource & Employment Services,WIKI_SP500
+PAYC,Industrials,Human Resource & Employment Services,WIKI_SP500
+PYPL,Financials,Transaction & Payment Processing Services,WIKI_SP500
+PNR,Industrials,Industrial Machinery & Supplies & Components,WIKI_SP500
+PEP,Consumer Staples,Soft Drinks & Non-alcoholic Beverages,WIKI_SP500
+PFE,Health Care,Pharmaceuticals,WIKI_SP500
+PCG,Utilities,Multi-Utilities,WIKI_SP500
+PM,Consumer Staples,Tobacco,WIKI_SP500
+PSX,Energy,Oil & Gas Refining & Marketing,WIKI_SP500
+PNW,Utilities,Multi-Utilities,WIKI_SP500
+PNC,Financials,Diversified Banks,WIKI_SP500
+POOL,Consumer Discretionary,Distributors,WIKI_SP500
+PPG,Materials,Specialty Chemicals,WIKI_SP500
+PPL,Utilities,Electric Utilities,WIKI_SP500
+PFG,Financials,Life & Health Insurance,WIKI_SP500
+PG,Consumer Staples,Personal Care Products,WIKI_SP500
+PGR,Financials,Property & Casualty Insurance,WIKI_SP500
+PLD,Real Estate,Industrial REITs,WIKI_SP500
+PRU,Financials,Life & Health Insurance,WIKI_SP500
+PEG,Utilities,Electric Utilities,WIKI_SP500
+PTC,Information Technology,Application Software,WIKI_SP500
+PSA,Real Estate,Self-Storage REITs,WIKI_SP500
+PHM,Consumer Discretionary,Homebuilding,WIKI_SP500
+PWR,Industrials,Construction & Engineering,WIKI_SP500
+QCOM,Information Technology,Semiconductors,WIKI_SP500
+DGX,Health Care,Health Care Services,WIKI_SP500
+Q,Information Technology,Semiconductor Materials & Equipment,WIKI_SP500
+RL,Consumer Discretionary,"Apparel, Accessories & Luxury Goods",WIKI_SP500
+RJF,Financials,Investment Banking & Brokerage,WIKI_SP500
+RTX,Industrials,Aerospace & Defense,WIKI_SP500
+O,Real Estate,Retail REITs,WIKI_SP500
+REG,Real Estate,Retail REITs,WIKI_SP500
+REGN,Health Care,Biotechnology,WIKI_SP500
+RF,Financials,Regional Banks,WIKI_SP500
+RSG,Industrials,Environmental & Facilities Services,WIKI_SP500
+RMD,Health Care,Health Care Equipment,WIKI_SP500
+RVTY,Health Care,Health Care Equipment,WIKI_SP500
+HOOD,Financials,Investment Banking & Brokerage,WIKI_SP500
+ROK,Industrials,Electrical Components & Equipment,WIKI_SP500
+ROL,Industrials,Environmental & Facilities Services,WIKI_SP500
+ROP,Information Technology,Electronic Equipment & Instruments,WIKI_SP500
+ROST,Consumer Discretionary,Apparel Retail,WIKI_SP500
+RCL,Consumer Discretionary,"Hotels, Resorts & Cruise Lines",WIKI_SP500
+SPGI,Financials,Financial Exchanges & Data,WIKI_SP500
+CRM,Information Technology,Application Software,WIKI_SP500
+SNDK,Information Technology,"Technology Hardware, Storage & Peripherals",WIKI_SP500
+SBAC,Real Estate,Telecom Tower REITs,WIKI_SP500
+SLB,Energy,Oil & Gas Equipment & Services,WIKI_SP500
+STX,Information Technology,"Technology Hardware, Storage & Peripherals",WIKI_SP500
+SRE,Utilities,Multi-Utilities,WIKI_SP500
+NOW,Information Technology,Systems Software,WIKI_SP500
+SHW,Materials,Specialty Chemicals,WIKI_SP500
+SPG,Real Estate,Retail REITs,WIKI_SP500
+SWKS,Information Technology,Semiconductors,WIKI_SP500
+SJM,Consumer Staples,Packaged Foods & Meats,WIKI_SP500
+SW,Materials,Paper & Plastic Packaging Products & Materials,WIKI_SP500
+SNA,Industrials,Industrial Machinery & Supplies & Components,WIKI_SP500
+SOLV,Health Care,Health Care Technology,WIKI_SP500
+SO,Utilities,Electric Utilities,WIKI_SP500
+LUV,Industrials,Passenger Airlines,WIKI_SP500
+SWK,Industrials,Industrial Machinery & Supplies & Components,WIKI_SP500
+SBUX,Consumer Discretionary,Restaurants,WIKI_SP500
+STT,Financials,Asset Management & Custody Banks,WIKI_SP500
+STLD,Materials,Steel,WIKI_SP500
+STE,Health Care,Health Care Equipment,WIKI_SP500
+SYK,Health Care,Health Care Equipment,WIKI_SP500
+SMCI,Information Technology,"Technology Hardware, Storage & Peripherals",WIKI_SP500
+SYF,Financials,Consumer Finance,WIKI_SP500
+SNPS,Information Technology,Application Software,WIKI_SP500
+SYY,Consumer Staples,Food Distributors,WIKI_SP500
+TMUS,Communication Services,Wireless Telecommunication Services,WIKI_SP500
+TROW,Financials,Asset Management & Custody Banks,WIKI_SP500
+TTWO,Communication Services,Interactive Home Entertainment,WIKI_SP500
+TPR,Consumer Discretionary,"Apparel, Accessories & Luxury Goods",WIKI_SP500
+TRGP,Energy,Oil & Gas Storage & Transportation,WIKI_SP500
+TGT,Consumer Staples,Consumer Staples Merchandise Retail,WIKI_SP500
+TEL,Information Technology,Electronic Manufacturing Services,WIKI_SP500
+TDY,Information Technology,Electronic Equipment & Instruments,WIKI_SP500
+TER,Information Technology,Semiconductor Materials & Equipment,WIKI_SP500
+TSLA,Consumer Discretionary,Automobile Manufacturers,WIKI_SP500
+TXN,Information Technology,Semiconductors,WIKI_SP500
+TPL,Energy,Oil & Gas Exploration & Production,WIKI_SP500
+TXT,Industrials,Aerospace & Defense,WIKI_SP500
+TMO,Health Care,Life Sciences Tools & Services,WIKI_SP500
+TJX,Consumer Discretionary,Apparel Retail,WIKI_SP500
+TKO,Communication Services,Movies & Entertainment,WIKI_SP500
+TTD,Communication Services,Advertising,WIKI_SP500
+TSCO,Consumer Discretionary,Other Specialty Retail,WIKI_SP500
+TT,Industrials,Building Products,WIKI_SP500
+TDG,Industrials,Aerospace & Defense,WIKI_SP500
+TRV,Financials,Property & Casualty Insurance,WIKI_SP500
+TRMB,Information Technology,Electronic Equipment & Instruments,WIKI_SP500
+TFC,Financials,Diversified Banks,WIKI_SP500
+TYL,Information Technology,Application Software,WIKI_SP500
+TSN,Consumer Staples,Packaged Foods & Meats,WIKI_SP500
+USB,Financials,Diversified Banks,WIKI_SP500
+UBER,Industrials,Passenger Ground Transportation,WIKI_SP500
+UDR,Real Estate,Multi-Family Residential REITs,WIKI_SP500
+ULTA,Consumer Discretionary,Other Specialty Retail,WIKI_SP500
+UNP,Industrials,Rail Transportation,WIKI_SP500
+UAL,Industrials,Passenger Airlines,WIKI_SP500
+UPS,Industrials,Air Freight & Logistics,WIKI_SP500
+URI,Industrials,Trading Companies & Distributors,WIKI_SP500
+UNH,Health Care,Managed Health Care,WIKI_SP500
+UHS,Health Care,Health Care Facilities,WIKI_SP500
+VLO,Energy,Oil & Gas Refining & Marketing,WIKI_SP500
+VTR,Real Estate,Health Care REITs,WIKI_SP500
+VLTO,Industrials,Environmental & Facilities Services,WIKI_SP500
+VRSN,Information Technology,Internet Services & Infrastructure,WIKI_SP500
+VRSK,Industrials,Research & Consulting Services,WIKI_SP500
+VZ,Communication Services,Integrated Telecommunication Services,WIKI_SP500
+VRTX,Health Care,Biotechnology,WIKI_SP500
+VTRS,Health Care,Pharmaceuticals,WIKI_SP500
+VICI,Real Estate,Hotel & Resort REITs,WIKI_SP500
+V,Financials,Transaction & Payment Processing Services,WIKI_SP500
+VST,Utilities,Electric Utilities,WIKI_SP500
+VMC,Materials,Construction Materials,WIKI_SP500
+WRB,Financials,Property & Casualty Insurance,WIKI_SP500
+GWW,Industrials,Industrial Machinery & Supplies & Components,WIKI_SP500
+WAB,Industrials,Construction Machinery & Heavy Transportation Equipment,WIKI_SP500
+WMT,Consumer Staples,Consumer Staples Merchandise Retail,WIKI_SP500
+DIS,Communication Services,Movies & Entertainment,WIKI_SP500
+WBD,Communication Services,Broadcasting,WIKI_SP500
+WM,Industrials,Environmental & Facilities Services,WIKI_SP500
+WAT,Health Care,Life Sciences Tools & Services,WIKI_SP500
+WEC,Utilities,Electric Utilities,WIKI_SP500
+WFC,Financials,Diversified Banks,WIKI_SP500
+WELL,Real Estate,Health Care REITs,WIKI_SP500
+WST,Health Care,Health Care Supplies,WIKI_SP500
+WDC,Information Technology,"Technology Hardware, Storage & Peripherals",WIKI_SP500
+WY,Real Estate,Timber REITs,WIKI_SP500
+WSM,Consumer Discretionary,Homefurnishing Retail,WIKI_SP500
+WMB,Energy,Oil & Gas Storage & Transportation,WIKI_SP500
+WTW,Financials,Insurance Brokers,WIKI_SP500
+WDAY,Information Technology,Application Software,WIKI_SP500
+WYNN,Consumer Discretionary,Casinos & Gaming,WIKI_SP500
+XEL,Utilities,Multi-Utilities,WIKI_SP500
+XYL,Industrials,Industrial Machinery & Supplies & Components,WIKI_SP500
+YUM,Consumer Discretionary,Restaurants,WIKI_SP500
+ALNY,Health Care,Biotechnology,WIKI_NASDAQ100
+ARM,Information Technology,Semiconductors,WIKI_NASDAQ100
+ASML,Information Technology,Industrial Machinery,WIKI_NASDAQ100
+TEAM,Information Technology,Computer Software,WIKI_NASDAQ100
+CCEP,Consumer Staples,Soft Drinks,WIKI_NASDAQ100
+FER,Industrials,"Military, Government, Technical",WIKI_NASDAQ100
+INSM,Health Care,Biotechnology,WIKI_NASDAQ100
+MRVL,Information Technology,Semiconductors,WIKI_NASDAQ100
+MELI,Consumer Discretionary,Catalog/Specialty Distribution,WIKI_NASDAQ100
+MSTR,Information Technology,Computer Software,WIKI_NASDAQ100
+PDD,Information Technology,EDP Services,WIKI_NASDAQ100
+SHOP,Information Technology,Computer Software,WIKI_NASDAQ100
+TRI,Information Technology,Computer Software,WIKI_NASDAQ100

@@ -138,7 +138,8 @@ class KISBroker:
         self.settings = settings or load_settings()
         self.env = self.settings.get("kis", {}).get("env", self.settings.get("env", "paper"))
         if self.env != "prod":
-            raise RuntimeError("paper trading is disabled: set env=prod in config/settings.yaml")
+            logging.warning("KIS env=paper로 설정되어 있습니다. (조회/수집만 사용)");
+            # viewer 버전은 조회/수집만 수행하며, 주문/잔고 기능이 제거되었습니다.
         self.custtype = self.settings["kis"].get("custtype", "P")
         self.rate_limit_sleep = float(self.settings["kis"].get("rate_limit_sleep_sec", 0.5))
         self.timeout_connect = float(self.settings["kis"].get("timeout_connect_sec", 5))
@@ -189,13 +190,24 @@ class KISBroker:
         self._consecutive_errors = 0
         self._auth_forbidden_last_ts = 0.0
 
-        # Rate Limiter setup (Total capacity = num_keys * single_key_limit)
+        # Rate limiter can be tuned from settings for stability in viewer mode.
         safe_tps = 1.0 / max(0.01, self.rate_limit_sleep)
-        total_tps = safe_tps * len(self.sessions)
+        total_tps_cfg = self.settings["kis"].get("rate_limiter_total_tps")
+        total_tps = float(total_tps_cfg) if total_tps_cfg is not None else (safe_tps * len(self.sessions))
+        total_tps = max(0.1, total_tps)
+
+        max_tokens_cfg = self.settings["kis"].get("rate_limiter_max_tokens")
+        max_tokens = float(max_tokens_cfg) if max_tokens_cfg is not None else max(10.0, total_tps * 2)
+        max_tokens = max(1.0, max_tokens)
+
+        reserve_cfg = self.settings["kis"].get("rate_limiter_trading_reserve")
+        trading_reserve = float(reserve_cfg) if reserve_cfg is not None else max(5.0, total_tps * 0.2)
+        trading_reserve = max(0.0, trading_reserve)
+
         self.rate_limiter = RateLimiter(
-            max_tokens=max(10.0, total_tps * 2),
+            max_tokens=max_tokens,
             refill_rate=total_tps,
-            trading_reserve=max(5.0, total_tps * 0.2) 
+            trading_reserve=trading_reserve,
         )
 
     @property
@@ -399,80 +411,7 @@ class KISBroker:
             raise last_exc
         raise RuntimeError("request failed")
 
-    # --------------- Trading ---------------
-    def _tr_id(self, paper_code: str, prod_code: str) -> str:
-        return paper_code if self.env == "paper" else prod_code
-
-    def send_order(self, code: str, side: str, qty: int, price: Optional[float] = None, ord_dvsn: str = "01") -> Dict[str, Any]:
-        # side: BUY/SELL
-        url = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-cash"
-        tr_id = self._tr_id("VTTC0012U", "TTTC0012U") if side.upper() == "BUY" else self._tr_id("VTTC0011U", "TTTC0011U")
-        body = {
-            "CANO": self.account_no,
-            "ACNT_PRDT_CD": self.account_product,
-            "PDNO": code,
-            "ORD_DVSN": ord_dvsn,
-            "ORD_QTY": str(qty),
-            "ORD_UNPR": str(price or 0),
-        }
-        res = self.request(tr_id, url, method="POST", json_body=body, priority="HIGH")
-        return res
-
-    def cancel_order(self, code: str, qty: int, orgn_odno: str, ord_orgno: str, ord_dvsn: str = "01") -> Dict[str, Any]:
-        url = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-rvsecncl"
-        tr_id = self._tr_id("VTTC0013U", "TTTC0013U")
-        body = {
-            "CANO": self.account_no,
-            "ACNT_PRDT_CD": self.account_product,
-            "KRX_FWDG_ORD_ORGNO": ord_orgno,
-            "ORGN_ODNO": orgn_odno,
-            "ORD_DVSN": ord_dvsn,
-            "ORD_QTY": str(qty),
-            "RVSE_CNCL_DVSN_CD": "02",  # 취소
-            "PDNO": code,
-            "ORD_UNPR": "0",
-        }
-        return self.request(tr_id, url, method="POST", json_body=body, priority="HIGH")
-
-    def get_orders(self, start_date: str, end_date: str) -> Dict[str, Any]:
-        url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
-        tr_id = self._tr_id("VTTC0081R", "TTTC0081R")
-        params = {
-            "CANO": self.account_no,
-            "ACNT_PRDT_CD": self.account_product,
-            "INQR_STRT_DT": start_date.replace("-", ""),
-            "INQR_END_DT": end_date.replace("-", ""),
-            "SLL_BUY_DVSN_CD": "00",
-            "INQR_DVSN": "00",
-            "PDNO": "",
-            "CCLD_DVSN": "00",
-            "ORD_GNO_BRNO": "",
-            "ODNO": "",
-            "INQR_DVSN_3": "00",
-            "INQR_DVSN_1": "",
-            "CTX_AREA_FK100": "",
-            "CTX_AREA_NK100": "",
-        }
-        return self.request(tr_id, url, params=params, priority="HIGH")
-
-    def get_balance(self) -> Dict[str, Any]:
-        url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-balance"
-        tr_id = self._tr_id("VTTC8434R", "TTTC8434R")
-        params = {
-            "CANO": self.account_no,
-            "ACNT_PRDT_CD": self.account_product,
-            "AFHR_FLPR_YN": "N",
-            "OFL_YN": "",
-            "INQR_DVSN": "00",
-            "UNPR_DVSN": "01",
-            "FUND_STTL_ICLD_YN": "N",
-            "FNCG_AMT_AUTO_RDPT_YN": "N",
-            "PRCS_DVSN": "01",
-            "CTX_AREA_FK100": "",
-            "CTX_AREA_NK100": "",
-        }
-        return self.request(tr_id, url, params=params, priority="HIGH")
-
+    # --------------- Quotes ---------------
     def get_current_price(self, code: str) -> Dict[str, Any]:
         url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-price"
         tr_id = "FHKST01010100"
