@@ -5,7 +5,6 @@ import {
   fetchCurrentPrice,
   fetchSelection,
   fetchSelectionFilters,
-  fetchStatus,
   updateSelectionFilterToggle,
   overrideSector
 } from './api'
@@ -107,7 +106,6 @@ function App() {
   const [currentPrice, setCurrentPrice] = useState(null)
   const [currentPriceLoading, setCurrentPriceLoading] = useState(false)
   const [selection, setSelection] = useState({ stages: [], candidates: [], stage_items: {} })
-  const [status, setStatus] = useState(null)
   const [sectorFilter, setSectorFilter] = useState('ALL')
   const [search, setSearch] = useState('')
   const [lastUpdated, setLastUpdated] = useState(null)
@@ -120,6 +118,11 @@ function App() {
   const [sectorOverrideSaving, setSectorOverrideSaving] = useState(false)
   const [sectorOverrideError, setSectorOverrideError] = useState('')
   const chartWheelRef = useRef(null)
+  const analysisTimerRef = useRef(null)
+  const analysisDelayTimerRef = useRef(null)
+  const analysisReadyRef = useRef(false)
+  const [analysisLoadingProgress, setAnalysisLoadingProgress] = useState(0)
+  const [analysisLoading, setAnalysisLoading] = useState(false)
   const [openHelp, setOpenHelp] = useState(null)
 
   const loadData = () => {
@@ -148,9 +151,6 @@ function App() {
         disparity: payload.disparity !== false,
       })
     }).catch(() => {})
-    fetchStatus().then((data) => {
-      setStatus(data && typeof data === 'object' ? data : null)
-    }).catch(() => {})
     setLastUpdated(new Date())
   }
 
@@ -161,17 +161,69 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!selected) return
+    if (!selected || !modalOpen) return
+    const code = selected.code
+    if (!code) return
+
+    setPrices([])
     setPricesLoading(true)
-    fetchPrices(selected.code, PRICE_DAYS)
+    setCurrentPrice(null)
+    setAnalysisLoading(true)
+    setAnalysisLoadingProgress(0)
+    analysisReadyRef.current = false
+
+    if (analysisTimerRef.current) clearInterval(analysisTimerRef.current)
+    if (analysisDelayTimerRef.current) clearTimeout(analysisDelayTimerRef.current)
+    analysisTimerRef.current = setInterval(() => {
+      setAnalysisLoadingProgress((prev) => {
+        const isReady = analysisReadyRef.current
+        const step = isReady ? 18 : 2
+        const target = isReady ? 100 : 95
+        const next = Math.min(target, prev + step)
+        if (next >= 100) {
+          clearInterval(analysisTimerRef.current)
+          analysisTimerRef.current = null
+          if (!analysisDelayTimerRef.current) {
+            analysisDelayTimerRef.current = setTimeout(() => {
+              setAnalysisLoading(false)
+            }, 500)
+          }
+        }
+        return next
+      })
+    }, 25)
+
+    let mounted = true
+    fetchPrices(code, PRICE_DAYS)
       .then((data) => {
+        if (!mounted) return
         setPrices(Array.isArray(data) ? data : [])
       })
       .catch(() => {
+        if (!mounted) return
         setPrices([])
       })
-      .finally(() => setPricesLoading(false))
-  }, [selected])
+      .finally(() => {
+        if (!mounted) return
+        analysisReadyRef.current = true
+        setPricesLoading(false)
+        setAnalysisLoadingProgress((prev) => Math.max(prev, 85))
+      })
+
+    return () => {
+      mounted = false
+      if (analysisTimerRef.current) {
+        clearInterval(analysisTimerRef.current)
+        analysisTimerRef.current = null
+      }
+      if (analysisDelayTimerRef.current) {
+        clearTimeout(analysisDelayTimerRef.current)
+        analysisDelayTimerRef.current = null
+      }
+      setAnalysisLoading(false)
+      setAnalysisLoadingProgress(0)
+    }
+  }, [selected, modalOpen])
 
   useEffect(() => {
     if (!selected || !modalOpen) return
@@ -211,9 +263,17 @@ function App() {
     if (!modalOpen) {
       setCurrentPrice(null)
       setCurrentPriceLoading(false)
+      setPrices([])
+      setPricesLoading(false)
+      setAnalysisLoading(false)
+      setAnalysisLoadingProgress(0)
       setSectorOverrideValue('')
       setSectorOverrideSaving(false)
       setSectorOverrideError('')
+      if (analysisTimerRef.current) {
+        clearInterval(analysisTimerRef.current)
+        analysisTimerRef.current = null
+      }
     }
     return () => {
       document.body.style.overflow = ''
@@ -394,7 +454,7 @@ function App() {
     if (!stage) return '-'
     if (stage.key === 'min_amount') return formatCurrency(stage.value)
     if (stage.key === 'liquidity') return `Top ${stage.value}`
-    if (stage.key === 'final') return `Max ${stage.value}`
+    if (stage.key === 'final') return stage.value === null || stage.value === undefined || stage.value === '' ? '-' : `Max ${stage.value}`
     if (stage.key === 'disparity' && stage.value) {
       const k = formatPct((stage.value.nasdaq || 0) * 100)
       const q = formatPct((stage.value.sp500 || 0) * 100)
@@ -408,7 +468,7 @@ function App() {
     min_amount: 'Filter 1',
     liquidity: 'Filter 2',
     disparity: 'Filter 3',
-    final: 'Final'
+    final: 'Max Positions'
   }
 
   const stageHelp = {
@@ -442,7 +502,7 @@ function App() {
     const items = key === 'universe' ? [] : asArray(selectionStageItems[key])
     return {
       key,
-      label: stage.label || key,
+      label: key === 'final' ? 'Max Positions' : (stage.label || key),
       criteria: formatStageValue(stage),
       count,
       drop,
@@ -452,8 +512,7 @@ function App() {
       items,
     }
   })
-  // Final == 최종 후보; avoid showing duplicate cards in the flow grid.
-  const flowStages = stageNodes.filter((stage) => stage.key !== 'final')
+  const flowStages = stageNodes
 
   const stageColumns = stageNodes.filter((node) => ['min_amount', 'liquidity', 'disparity'].includes(node.key))
   const finalStage = stageNodes.find((node) => node.key === 'final')
@@ -466,44 +525,7 @@ function App() {
       .filter((row) => row && row.code)
       .map((row, idx) => ({ ...row, rank: row.rank || (idx + 1) }))
   }, [selectionCandidates, finalStage])
-  const disparityCount = stageMap.disparity?.count || 0
   const finalCount = finalStage?.count || finalCandidates.length
-  const finalPassRate = universeCount ? (finalCount / universeCount) * 100 : 0
-  const selectionDateLabel = selection?.date || '-'
-  const watchdogRuntime = status?.watchdog_runtime && typeof status.watchdog_runtime === 'object'
-    ? status.watchdog_runtime
-    : {}
-  const dailyLockActive = watchdogRuntime.daily_lock_active === true
-  const watchdogExternal = status?.watchdog_external && typeof status.watchdog_external === 'object'
-    ? status.watchdog_external
-    : {}
-  const watchdogLastRunTs = Number(watchdogExternal.last_daily_run_ts || 0)
-  const watchdogHasState = Object.keys(watchdogExternal).length > 0
-  const watchdogMissing = watchdogExternal.last_daily_missing
-  const watchdogRunTimeLabel = watchdogLastRunTs
-    ? new Date(watchdogLastRunTs * 1000).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
-    : '-'
-  const watchdogDateLabel = watchdogExternal.last_daily_date || '-'
-  const watchdogAgeSec = watchdogLastRunTs ? Math.max(0, (Date.now() / 1000) - watchdogLastRunTs) : null
-  let watchdogStateText = 'INIT'
-  let watchdogStateClass = 'status-warn'
-  if (dailyLockActive) {
-    watchdogStateText = 'RUNNING'
-    watchdogStateClass = 'status-warn'
-  } else if (!watchdogHasState) {
-    watchdogStateText = 'NO DATA'
-  } else if (watchdogExternal.last_daily_rc === 0) {
-    if (watchdogAgeSec !== null && watchdogAgeSec > 21600) {
-      watchdogStateText = 'STALE'
-      watchdogStateClass = 'status-warn'
-    } else {
-      watchdogStateText = 'OK'
-      watchdogStateClass = 'status-ok'
-    }
-  } else if (watchdogExternal.last_daily_rc != null) {
-    watchdogStateText = 'ERROR'
-    watchdogStateClass = 'status-error'
-  }
 
   const refreshLabel = lastUpdated
     ? `${lastUpdated.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`
@@ -592,7 +614,7 @@ function App() {
             </select>
           </div>
           <a
-            className="discord-btn"
+            className="primary-btn discord-btn"
             href="https://discord.gg/xHtvSRZG3"
             target="_blank"
             rel="noopener noreferrer"
@@ -603,45 +625,6 @@ function App() {
           <div className="refresh-meta">최근 업데이트 {refreshLabel}</div>
         </div>
       </header>
-
-      <section id="summary" className="summary-strip">
-        <div className="summary-card">
-          <span>유니버스</span>
-          <strong>{formatNumber(universeCount)}</strong>
-          <em>{filter === 'NASDAQ100' ? 'NASDAQ 100' : 'S&P 500'} 기준</em>
-        </div>
-        <div className="summary-card">
-          <span>필터 통과</span>
-          <strong>{formatNumber(disparityCount)}</strong>
-          <em>통과율 {universeCount ? ((disparityCount / universeCount) * 100).toFixed(1) : '0.0'}%</em>
-        </div>
-        <div className="summary-card">
-          <span>최종 후보</span>
-          <strong>{formatNumber(finalCount)}</strong>
-          <em>선정 비율 {universeCount ? finalPassRate.toFixed(1) : '0.0'}%</em>
-        </div>
-        <div className="summary-card">
-          <span>기준일</span>
-          <strong>{selectionDateLabel}</strong>
-          <em>최근 업데이트 {refreshLabel}</em>
-        </div>
-        <div className="summary-card">
-          <span>DB Watchdog</span>
-          <strong className={`status-chip ${watchdogStateClass}`}>{watchdogStateText}</strong>
-          <em>{watchdogDateLabel} · {watchdogRunTimeLabel} · miss {watchdogMissing ?? '-'}</em>
-        </div>
-        <div className="summary-card">
-          <span>Discord 알림</span>
-          <strong>ON</strong>
-          <em>신규 편입 시 전송</em>
-        </div>
-      </section>
-
-      <nav className="section-nav">
-        <a href="#stocks">주식목록</a>
-        <a href="#filters">선별 과정</a>
-        <a href="#final">최종 후보</a>
-      </nav>
 
       <main className="layout">
         <aside id="stocks" className="panel stock-panel">
@@ -896,83 +879,96 @@ function App() {
                   <div className="delta-sub">{formatPct(liveChangePct)} · {formatTime(liveAsOfLabel)} · {String(liveSourceLabel).toUpperCase()}</div>
                 </div>
               </div>
-
-              <div className="chart-card chart-zoom" ref={chartWheelRef}>
-                <div className="chart-title">Price · MA25 · Volume</div>
-                {pricesLoading ? (
-                  <div className="empty">차트 로딩 중...</div>
-                ) : chartData.length === 0 ? (
-                  <div className="empty">가격 데이터가 없습니다.</div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={260}>
-                    <ComposedChart data={zoomedData.length ? zoomedData : chartData} margin={{ left: 6, right: 18, top: 10, bottom: 8 }}>
-                      <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.08)" />
-                      <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} interval={Math.max(0, Math.floor((zoomedData.length || chartData.length) / 6))} />
-                      <YAxis yAxisId="price" tick={{ fontSize: 11, fill: '#94a3b8' }} domain={['auto', 'auto']} />
-                      <YAxis yAxisId="volume" orientation="right" tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                      <Tooltip contentStyle={{ background: '#101827', border: '1px solid rgba(148,163,184,0.3)' }} labelStyle={{ color: '#e2e8f0' }} />
-                      <Legend wrapperStyle={{ color: '#cbd5f5' }} />
-                      <Area yAxisId="price" dataKey="close" stroke="#38bdf8" fill="rgba(14,116,144,0.35)" name="Close" />
-                      <Line yAxisId="price" type="monotone" dataKey="ma25" stroke="#f97316" dot={false} strokeWidth={2} name="MA25" />
-                      <Bar yAxisId="volume" dataKey="volume" fill="rgba(250,204,21,0.35)" name="Volume" />
-                      <Brush
-                        dataKey="date"
-                        height={24}
-                        stroke="#38bdf8"
-                        travellerWidth={10}
-                        startIndex={zoomRange.start}
-                        endIndex={zoomRange.end}
-                        onChange={handleBrushChange}
-                        data={chartData}
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-
-              <div className="chart-card">
-                <div className="chart-title">Disparity Flow</div>
-                {chartData.length === 0 ? (
-                  <div className="empty">가격 데이터가 없습니다.</div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={160}>
-                    <AreaChart data={zoomedData.length ? zoomedData : chartData} margin={{ left: 6, right: 18, top: 10, bottom: 8 }}>
-                      <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.08)" />
-                      <XAxis dataKey="date" hide />
-                      <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                      <Tooltip contentStyle={{ background: '#101827', border: '1px solid rgba(148,163,184,0.3)' }} labelStyle={{ color: '#e2e8f0' }} />
-                      <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="4 4" />
-                      <Area dataKey="disparity" stroke="#f43f5e" fill="rgba(248,113,113,0.3)" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-
-              <div className="price-table">
-                <div className="price-row head">
-                  <span>Date</span>
-                  <span>Open</span>
-                  <span>High</span>
-                  <span>Low</span>
-                  <span>Close</span>
-                  <span>Volume</span>
-                  <span>Amount</span>
-                  <span>Disp</span>
-                </div>
-                {tableRows.map((row) => (
-                  <div key={row.date} className="price-row">
-                    <span className="mono">{row.date}</span>
-                    <span>{formatCurrency(row.open)}</span>
-                    <span>{formatCurrency(row.high)}</span>
-                    <span>{formatCurrency(row.low)}</span>
-                    <span className="b">{formatCurrency(row.close)}</span>
-                    <span>{formatNumber(row.volume)}</span>
-                    <span>{formatCurrency(row.amount)}</span>
-                    <span>{formatPct((row.disparity || 0) * 100)}</span>
+              {analysisLoading ? (
+                <div className="analysis-loader">
+                  <div className="analysis-loader-copy">
+                    종목 분석 데이터를 불러오는 중입니다...
                   </div>
-                ))}
-                {tableRows.length === 0 && <div className="empty">가격 데이터가 없습니다.</div>}
-              </div>
+                  <div className="analysis-gauge-track">
+                    <div className="analysis-gauge-fill" style={{ width: `${analysisLoadingProgress}%` }} />
+                  </div>
+                  <div className="analysis-gauge-text">{Math.min(100, Math.floor(analysisLoadingProgress))}%</div>
+                </div>
+              ) : (
+                <>
+                  <div className="chart-card chart-zoom" ref={chartWheelRef}>
+                    <div className="chart-title">Price · MA25 · Volume</div>
+                    {pricesLoading ? (
+                      <div className="empty">차트 로딩 중...</div>
+                    ) : chartData.length === 0 ? (
+                      <div className="empty">가격 데이터가 없습니다.</div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height={260}>
+                        <ComposedChart data={zoomedData.length ? zoomedData : chartData} margin={{ left: 6, right: 18, top: 10, bottom: 8 }}>
+                          <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.08)" />
+                          <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} interval={Math.max(0, Math.floor((zoomedData.length || chartData.length) / 6))} />
+                          <YAxis yAxisId="price" tick={{ fontSize: 11, fill: '#94a3b8' }} domain={['auto', 'auto']} />
+                          <YAxis yAxisId="volume" orientation="right" tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                          <Tooltip contentStyle={{ background: '#101827', border: '1px solid rgba(148,163,184,0.3)' }} labelStyle={{ color: '#e2e8f0' }} />
+                          <Legend wrapperStyle={{ color: '#cbd5f5' }} />
+                          <Area yAxisId="price" dataKey="close" stroke="#38bdf8" fill="rgba(14,116,144,0.35)" name="Close" />
+                          <Line yAxisId="price" type="monotone" dataKey="ma25" stroke="#f97316" dot={false} strokeWidth={2} name="MA25" />
+                          <Bar yAxisId="volume" dataKey="volume" fill="rgba(250,204,21,0.35)" name="Volume" />
+                          <Brush
+                            dataKey="date"
+                            height={24}
+                            stroke="#38bdf8"
+                            travellerWidth={10}
+                            startIndex={zoomRange.start}
+                            endIndex={zoomRange.end}
+                            onChange={handleBrushChange}
+                            data={chartData}
+                          />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+
+                  <div className="chart-card">
+                    <div className="chart-title">Disparity Flow</div>
+                    {chartData.length === 0 ? (
+                      <div className="empty">가격 데이터가 없습니다.</div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height={160}>
+                        <AreaChart data={zoomedData.length ? zoomedData : chartData} margin={{ left: 6, right: 18, top: 10, bottom: 8 }}>
+                          <CartesianGrid strokeDasharray="4 4" stroke="rgba(255,255,255,0.08)" />
+                          <XAxis dataKey="date" hide />
+                          <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                          <Tooltip contentStyle={{ background: '#101827', border: '1px solid rgba(148,163,184,0.3)' }} labelStyle={{ color: '#e2e8f0' }} />
+                          <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="4 4" />
+                          <Area dataKey="disparity" stroke="#f43f5e" fill="rgba(248,113,113,0.3)" />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+
+                  <div className="price-table">
+                    <div className="price-row head">
+                      <span>Date</span>
+                      <span>Open</span>
+                      <span>High</span>
+                      <span>Low</span>
+                      <span>Close</span>
+                      <span>Volume</span>
+                      <span>Amount</span>
+                      <span>Disp</span>
+                    </div>
+                    {tableRows.map((row) => (
+                      <div key={row.date} className="price-row">
+                        <span className="mono">{row.date}</span>
+                        <span>{formatCurrency(row.open)}</span>
+                        <span>{formatCurrency(row.high)}</span>
+                        <span>{formatCurrency(row.low)}</span>
+                        <span className="b">{formatCurrency(row.close)}</span>
+                        <span>{formatNumber(row.volume)}</span>
+                        <span>{formatCurrency(row.amount)}</span>
+                        <span>{formatPct((row.disparity || 0) * 100)}</span>
+                      </div>
+                    ))}
+                    {tableRows.length === 0 && <div className="empty">가격 데이터가 없습니다.</div>}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
