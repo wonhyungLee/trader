@@ -74,17 +74,50 @@ except Exception as e:
 new_codes = [c for c in candidate_codes if c not in last_code_set]
 item_by_code = {str(r.get("code") or "").upper().strip(): r for r in candidate_items if isinstance(r, dict)}
 
+UNCLASSIFIED_LABEL = "미분류"
+
+def dedup_by_sector(items, limit: int = 10):
+    """Return at most 1 item per sector, preferring the best rank (smallest number)."""
+    best = {}
+    for idx, it in enumerate(items or []):
+        if not isinstance(it, dict):
+            continue
+        code = str(it.get("code") or "").upper().strip()
+        if not code:
+            continue
+        sector = str(it.get("sector_name") or "").strip() or UNCLASSIFIED_LABEL
+
+        rank_raw = it.get("rank")
+        rank_val = None
+        try:
+            rank_val = int(rank_raw)
+            if rank_val <= 0:
+                rank_val = None
+        except Exception:
+            rank_val = None
+
+        key = sector
+        cand = (rank_val if rank_val is not None else 10**9, idx, it)
+        prev = best.get(key)
+        if prev is None or cand[:2] < prev[:2]:
+            best[key] = cand
+
+    ordered = sorted(best.values(), key=lambda x: (x[0], x[1]))
+    return [x[2] for x in ordered][: max(0, int(limit))]
+
 reco_label = "최근 추천"
 display_codes = []
 display_items = []
 if new_codes:
-    reco_label = f"신규 추천 ({len(new_codes)})"
     display_codes = new_codes[:10]
     display_items = [item_by_code.get(c, {"code": c}) for c in display_codes]
+    display_items = dedup_by_sector(display_items, limit=10)
+    display_codes = [str(r.get("code") or "").upper().strip() for r in display_items if isinstance(r, dict)]
+    reco_label = f"신규 추천 ({len(new_codes)}->{len(display_items)})"
 else:
     # Prefer the latest computed candidates; if unavailable fall back to last snapshot.
     display_items = candidate_items if candidate_items else last_items
-    display_items = display_items[:10]
+    display_items = dedup_by_sector(display_items, limit=10)
     display_codes = [str(r.get("code") or "").upper().strip() for r in display_items if isinstance(r, dict)]
 
 reco_lines = []
