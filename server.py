@@ -39,6 +39,7 @@ CLIENT_ERROR_LOG = Path("logs/client_error.log")
 ACCOUNT_SNAPSHOT_PATH = Path("data/account_snapshot.json")
 WATCHDOG_STATE_PATH = Path(WATCHDOG_CFG.get("state_file", "data/watchdog_state.json"))
 WATCHDOG_DAILY_LOCK_PATH = Path(WATCHDOG_CFG.get("daily_lock_file", "data/daily_loader.lock"))
+WATCHDOG_DAILY_CODES_FILE = Path(WATCHDOG_CFG.get("daily_codes_file", "data/csv/watchdog_daily_codes.csv"))
 # Admin password for endpoints that mutate server state (filter toggles, sector overrides, etc).
 # Do NOT hardcode secrets in git; configure via environment or a local .env (ignored).
 KIS_TOGGLE_PASSWORD = os.getenv("KIS_TOGGLE_PASSWORD", "").strip()
@@ -52,6 +53,8 @@ _balance_cache: Dict[str, Any] = {"ts": 0.0, "data": None}
 _selection_cache: Dict[str, Any] = {"ts": 0.0, "data": None}
 _selection_lock = threading.Lock()
 SELECTION_CACHE_TTL = float(os.getenv("SELECTION_CACHE_TTL", "60"))
+SELECTION_CHANGE_LOG_DAYS = int(os.getenv("SELECTION_CHANGE_LOG_DAYS", "5"))
+SELECTION_CHANGE_LOG_MAX_DAYS = int(os.getenv("SELECTION_CHANGE_LOG_MAX_DAYS", "20"))
 STATUS_CACHE_TTL = float(os.getenv("STATUS_CACHE_TTL", "15"))
 STATUS_HEAVY_INTERVAL_SEC = float(os.getenv("STATUS_HEAVY_INTERVAL_SEC", "300"))
 _status_cache_lock = threading.Lock()
@@ -76,6 +79,23 @@ DB_WATCHDOG_INTERVAL_SEC = float(os.getenv("BNF_DB_WATCHDOG_INTERVAL_SEC", str(W
 DB_WATCHDOG_DAILY_STALE_DAYS = int(os.getenv("BNF_DB_WATCHDOG_DAILY_STALE_DAYS", str(WATCHDOG_CFG.get("daily_stale_days", 1))))
 DB_WATCHDOG_DAILY_CHUNK_DAYS = int(os.getenv("BNF_DB_WATCHDOG_DAILY_CHUNK_DAYS", str(WATCHDOG_CFG.get("daily_chunk_days", 90))))
 DB_WATCHDOG_DAILY_COOLDOWN_SEC = float(os.getenv("BNF_DB_WATCHDOG_DAILY_COOLDOWN_SEC", str(WATCHDOG_CFG.get("daily_cooldown_sec", 3600))))
+_invalid_latest_enabled_raw = os.getenv("BNF_DB_WATCHDOG_INVALID_LATEST_ENABLED")
+if _invalid_latest_enabled_raw is None:
+    DB_WATCHDOG_INVALID_LATEST_ENABLED = bool(WATCHDOG_CFG.get("invalid_latest_enabled", True))
+else:
+    DB_WATCHDOG_INVALID_LATEST_ENABLED = _invalid_latest_enabled_raw.strip().lower() not in {"0", "false", "no"}
+DB_WATCHDOG_INVALID_LATEST_AMOUNT_THRESHOLD = float(
+    os.getenv(
+        "BNF_DB_WATCHDOG_INVALID_LATEST_AMOUNT_THRESHOLD",
+        str(WATCHDOG_CFG.get("invalid_latest_amount_threshold", 0)),
+    )
+)
+DB_WATCHDOG_INVALID_LATEST_VOLUME_THRESHOLD = float(
+    os.getenv(
+        "BNF_DB_WATCHDOG_INVALID_LATEST_VOLUME_THRESHOLD",
+        str(WATCHDOG_CFG.get("invalid_latest_volume_threshold", 0)),
+    )
+)
 DB_WATCHDOG_REFILL_CHUNK_DAYS = int(os.getenv("BNF_DB_WATCHDOG_REFILL_CHUNK_DAYS", str(WATCHDOG_CFG.get("refill_chunk_days", 150))))
 DB_WATCHDOG_REFILL_SLEEP_SEC = float(os.getenv("BNF_DB_WATCHDOG_REFILL_SLEEP_SEC", str(WATCHDOG_CFG.get("refill_sleep_sec", 0.1))))
 DB_WATCHDOG_REFILL_MAX_CODES = int(os.getenv("BNF_DB_WATCHDOG_REFILL_MAX_CODES", str(WATCHDOG_CFG.get("refill_max_missing_per_cycle", 1))))
@@ -96,6 +116,14 @@ _watchdog_state: Dict[str, Any] = {
     "last_error": None,
     "last_stats": {},
 }
+
+SELECTION_SNAPSHOT_TABLE = "selection_snapshots"
+SELECTION_SNAPSHOT_VERSION = 2
+SELECTION_CHANGES_DISCLAIMER = (
+    '매수 후보(Selection)는 "지금 기준 신규 진입 후보"입니다. 후보에서 사라지는 것은 자동 매도 신호가 아닐 수 있으니, '
+    "아래의 이탈 사유(조건/랭킹)를 확인하세요."
+)
+SELECTION_CHANGES_NOTE = "이탈 사유는 해당 날짜 기준 전략 조건으로 판정했습니다."
 
 
 def get_conn(timeout: float = 5.0, busy_timeout_ms: int = 5000) -> sqlite3.Connection:
@@ -144,6 +172,51 @@ def _missing_codes(conn: sqlite3.Connection, table: str) -> int:
         return row[0]
     except Exception:
         return 0
+
+
+def _codes_missing_on_date(conn: sqlite3.Connection, table: str, date_str: str) -> List[str]:
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT u.code
+            FROM universe_members u
+            LEFT JOIN {table} t
+              ON u.code = t.code
+             AND t.date = ?
+            WHERE t.code IS NULL
+            ORDER BY u.code
+            """,
+            (date_str,),
+        ).fetchall()
+        return [str(r[0]) for r in rows if r and r[0]]
+    except Exception:
+        return []
+
+
+def _invalid_latest_codes(
+    conn: sqlite3.Connection,
+    amount_floor: float,
+    volume_floor: float,
+    date_str: str,
+) -> List[str]:
+    if not DB_WATCHDOG_INVALID_LATEST_ENABLED:
+        return []
+    if date_str is None:
+        return []
+    try:
+        rows = conn.execute(
+            """
+            SELECT code
+            FROM daily_price
+            WHERE date = ?
+              AND (CAST(COALESCE(amount, 0) AS REAL) <= ? OR CAST(COALESCE(volume, 0) AS REAL) <= ?)
+            ORDER BY code
+            """,
+            (date_str, amount_floor, volume_floor),
+        ).fetchall()
+        return [str(r[0]) for r in rows if r and r[0]]
+    except Exception:
+        return []
 
 
 def _load_filter_toggles(path: Path = FILTER_TOGGLE_PATH) -> Dict[str, bool]:
@@ -662,6 +735,16 @@ def _collect_watchdog_stats() -> Dict[str, Any]:
         missing_codes = _missing_codes(conn, "daily_price")
         mm = _minmax(conn, "daily_price")
         max_date = mm.get("max")
+        latest_missing_codes: List[str] = []
+        invalid_latest_codes: List[str] = []
+        if max_date:
+            latest_missing_codes = _codes_missing_on_date(conn, "daily_price", str(max_date))
+            invalid_latest_codes = _invalid_latest_codes(
+                conn,
+                DB_WATCHDOG_INVALID_LATEST_AMOUNT_THRESHOLD,
+                DB_WATCHDOG_INVALID_LATEST_VOLUME_THRESHOLD,
+                str(max_date),
+            )
         stale_days = None
         if max_date:
             try:
@@ -671,8 +754,11 @@ def _collect_watchdog_stats() -> Dict[str, Any]:
         return {
             "universe_total": universe_total,
             "missing_codes": missing_codes,
+            "latest_missing_codes": latest_missing_codes,
             "max_date": max_date,
             "stale_days": stale_days,
+            "invalid_latest_count": len(invalid_latest_codes),
+            "invalid_latest_codes": invalid_latest_codes,
         }
     finally:
         conn.close()
@@ -717,10 +803,21 @@ def _run_refill_for_code(code: str) -> Tuple[int, Optional[int]]:
     )
 
 
-def _run_daily_loader() -> Tuple[int, Optional[int]]:
+def _run_daily_loader(codes: Optional[List[str]] = None) -> Tuple[int, Optional[int]]:
+    args = ["--chunk-days", str(DB_WATCHDOG_DAILY_CHUNK_DAYS)]
+    if codes:
+        target_codes = sorted({str(code).strip().upper() for code in codes if str(code).strip()})
+        if target_codes:
+            WATCHDOG_DAILY_CODES_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with WATCHDOG_DAILY_CODES_FILE.open("w", encoding="utf-8") as f:
+                f.write("code\n")
+                for code in target_codes:
+                    f.write(f"{code}\n")
+            args.extend(["--codes-file", str(WATCHDOG_DAILY_CODES_FILE)])
+            logging.info("[watchdog] running daily_loader for %s target codes", len(target_codes))
     return _run_module(
         "src.collectors.daily_loader",
-        ["--chunk-days", str(DB_WATCHDOG_DAILY_CHUNK_DAYS)],
+        args,
         log_name="watchdog_daily.log",
     )
 
@@ -769,8 +866,13 @@ def _watchdog_cycle() -> None:
 
     stale_days = stats.get("stale_days")
     missing_codes = int(stats.get("missing_codes") or 0)
+    latest_missing_codes = [str(c).strip().upper() for c in (stats.get("latest_missing_codes") or [])]
+    invalid_latest_codes = [str(c).strip().upper() for c in (stats.get("invalid_latest_codes") or [])]
+    invalid_latest_count = int(stats.get("invalid_latest_count") or 0)
     should_daily = missing_codes > 0
     if isinstance(stale_days, int) and stale_days >= DB_WATCHDOG_DAILY_STALE_DAYS:
+        should_daily = True
+    if invalid_latest_count > 0:
         should_daily = True
 
     daily_running = _module_running("src.collectors.daily_loader")
@@ -803,7 +905,15 @@ def _watchdog_cycle() -> None:
     if should_daily and not daily_running and not refill_running:
         last_daily_ts = float(snapshot.get("last_daily_ts") or 0.0)
         if (now_ts - last_daily_ts) >= DB_WATCHDOG_DAILY_COOLDOWN_SEC:
-            daily_rc, daily_pid = _run_daily_loader()
+            target_codes = []
+            seen = set()
+            for code in latest_missing_codes + invalid_latest_codes:
+                key = str(code).strip().upper()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                target_codes.append(key)
+            daily_rc, daily_pid = _run_daily_loader(target_codes or None)
             _set_watchdog_state(
                 last_daily_rc=daily_rc,
                 last_daily_pid=daily_pid,
@@ -1335,6 +1445,513 @@ def kis_keys_toggle():
     return jsonify(enriched)
 
 
+def _selection_strategy_id(params: Any, toggles: Dict[str, bool]) -> str:
+    """Stable identifier for selection snapshot grouping (strategy params + UI toggles)."""
+    cfg = {
+        "min_amount": float(getattr(params, "min_amount", 0) or 0),
+        "liquidity_rank": int(getattr(params, "liquidity_rank", 0) or 0),
+        # NOTE: kept for backward-compat with existing strategy param naming.
+        "buy_nasdaq": float(getattr(params, "buy_kospi", 0) or 0),
+        "buy_sp500": float(getattr(params, "buy_kosdaq", 0) or 0),
+        "max_positions": int(getattr(params, "max_positions", 20) or 20),
+        "max_per_sector": int(getattr(params, "max_per_sector", 0) or 0),
+        "rank_mode": str(getattr(params, "rank_mode", "amount") or "amount").lower(),
+        "entry_mode": str(getattr(params, "entry_mode", "mean_reversion") or "mean_reversion").lower(),
+        "trend_ma25_rising": bool(getattr(params, "trend_ma25_rising", False)),
+        "toggles": {k: bool(toggles.get(k, True)) for k in FILTER_TOGGLE_KEYS},
+    }
+    blob = json.dumps(cfg, sort_keys=True, separators=(",", ":"))
+    hid = hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
+    return f"sel-{hid}"
+
+
+def _ensure_selection_snapshot_schema(conn: sqlite3.Connection) -> None:
+    try:
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {SELECTION_SNAPSHOT_TABLE} (
+                asof_date TEXT NOT NULL,
+                strategy_id TEXT NOT NULL,
+                snapshot_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (asof_date, strategy_id)
+            )
+            """
+        )
+        conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_{SELECTION_SNAPSHOT_TABLE}_strategy_date
+            ON {SELECTION_SNAPSHOT_TABLE}(strategy_id, asof_date)
+            """
+        )
+        conn.commit()
+    except Exception:
+        logging.exception("failed to ensure %s schema", SELECTION_SNAPSHOT_TABLE)
+
+
+def _selection_snapshot_exists(conn: sqlite3.Connection, asof_date: str, strategy_id: str) -> bool:
+    try:
+        row = conn.execute(
+            f"SELECT 1 FROM {SELECTION_SNAPSHOT_TABLE} WHERE asof_date=? AND strategy_id=? LIMIT 1",
+            (asof_date, strategy_id),
+        ).fetchone()
+        return bool(row)
+    except Exception:
+        return False
+
+
+def _store_selection_snapshot(conn: sqlite3.Connection, snapshot: Dict[str, Any]) -> None:
+    asof_date = str(snapshot.get("asof_date") or "").strip()
+    strategy_id = str(snapshot.get("strategy_id") or "").strip()
+    if not asof_date or not strategy_id:
+        return
+    try:
+        conn.execute(
+            f"""
+            INSERT OR REPLACE INTO {SELECTION_SNAPSHOT_TABLE} (asof_date, strategy_id, snapshot_json, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                asof_date,
+                strategy_id,
+                json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")),
+                datetime.utcnow().isoformat(),
+            ),
+        )
+        conn.commit()
+    except Exception:
+        logging.exception("failed to store selection snapshot %s/%s", asof_date, strategy_id)
+
+
+def _fetch_recent_trading_dates(conn: sqlite3.Connection, latest_date: str, limit: int) -> List[str]:
+    if not latest_date:
+        return []
+    try:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT date
+            FROM daily_price
+            WHERE date <= ?
+            ORDER BY date DESC
+            LIMIT ?
+            """,
+            (latest_date, int(limit)),
+        ).fetchall()
+        out: List[str] = []
+        for r in rows:
+            if not r:
+                continue
+            d = str(r[0]).strip()
+            if d:
+                out.append(d)
+        return out
+    except Exception:
+        return []
+
+
+def _compute_selection_snapshot_for_date(
+    conn: sqlite3.Connection,
+    params: Any,
+    toggles: Dict[str, bool],
+    asof_date: str,
+    strategy_id: str,
+) -> Dict[str, Any]:
+    """Compute a point-in-time selection snapshot for change-log (asof_date 기준).
+
+    Important: This is NOT a sell signal. Selection is "new entry candidates as-of-date".
+    """
+    asof_date = str(asof_date or "").strip()
+    universe_df = pd.read_sql_query("SELECT code, name, market, group_name FROM universe_members", conn)
+    universe_total = int(len(universe_df))
+    codes = universe_df["code"].dropna().astype(str).tolist()
+    if not codes or not asof_date:
+        return {
+            "version": SELECTION_SNAPSHOT_VERSION,
+            "asof_date": asof_date,
+            "strategy_id": strategy_id,
+            "universe_total": universe_total,
+            "selected": [],
+            "eval": {},
+            "note": SELECTION_CHANGES_NOTE,
+        }
+
+    min_amount = float(getattr(params, "min_amount", 0) or 0)
+    liquidity_rank = int(getattr(params, "liquidity_rank", 0) or 0)
+    buy_nasdaq = float(getattr(params, "buy_kospi", 0) or 0)
+    buy_sp500 = float(getattr(params, "buy_kosdaq", 0) or 0)
+    max_positions = int(getattr(params, "max_positions", 20) or 20)
+    max_per_sector = int(getattr(params, "max_per_sector", 0) or 0)
+    rank_mode = str(getattr(params, "rank_mode", "amount") or "amount").lower()
+    entry_mode = str(getattr(params, "entry_mode", "mean_reversion") or "mean_reversion").lower()
+    trend_filter = bool(getattr(params, "trend_ma25_rising", False))
+
+    rows: List[Tuple[Any, ...]] = []
+    sql = """
+        SELECT code, date, close, amount, ma25, disparity
+        FROM daily_price
+        WHERE code = ?
+          AND date <= ?
+        ORDER BY date DESC
+        LIMIT 4
+    """
+    for code in codes:
+        rows.extend(conn.execute(sql, (code, asof_date)).fetchall())
+
+    df = pd.DataFrame(rows, columns=["code", "date", "close", "amount", "ma25", "disparity"])
+    if df.empty:
+        return {
+            "version": SELECTION_SNAPSHOT_VERSION,
+            "asof_date": asof_date,
+            "strategy_id": strategy_id,
+            "universe_total": universe_total,
+            "selected": [],
+            "eval": {},
+            "note": SELECTION_CHANGES_NOTE,
+        }
+
+    df = df.sort_values(["code", "date"])
+    df["ma25_prev"] = df.groupby("code")["ma25"].shift(1)
+    df["close_prev"] = df.groupby("code")["close"].shift(1)
+    df["close_delta_pct"] = df.groupby("code")["close"].pct_change(1) * 100
+    df["ret3"] = df.groupby("code")["close"].pct_change(3)
+    latest = df.groupby("code").tail(1).copy()
+    latest = latest.merge(universe_df, on="code", how="left")
+    try:
+        sector_df = pd.read_sql_query("SELECT code, sector_name, industry_name FROM sector_map", conn)
+        latest = latest.merge(sector_df, on="code", how="left")
+    except Exception:
+        pass
+
+    stage_universe = latest
+
+    stage_min_amount = stage_universe
+    if min_amount and toggles.get("min_amount", True):
+        stage_min_amount = stage_universe[stage_universe["amount"] >= min_amount]
+
+    stage_liquidity = stage_min_amount
+    if liquidity_rank and toggles.get("liquidity", True):
+        stage_liquidity = stage_min_amount.sort_values("amount", ascending=False).head(liquidity_rank)
+
+    def pass_signal(row) -> bool:
+        group = str(row.get("group_name") or row.get("market") or "").upper()
+        threshold = buy_nasdaq if "NASDAQ" in group else buy_sp500
+        try:
+            disp = float(row.get("disparity") or 0)
+            r3 = float(row.get("ret3") or 0)
+        except Exception:
+            return False
+        if entry_mode == "trend_follow":
+            return disp >= threshold and r3 >= 0
+        return disp <= threshold
+
+    stage_disparity = stage_liquidity
+    if toggles.get("disparity", True):
+        stage_disparity = stage_liquidity[stage_liquidity.apply(pass_signal, axis=1)]
+
+    stage_trend = stage_disparity
+    if trend_filter:
+        stage_trend = stage_disparity[stage_disparity["ma25_prev"].notna() & (stage_disparity["ma25"] > stage_disparity["ma25_prev"])]
+
+    ranked = stage_trend.copy()
+    if rank_mode == "score":
+        if entry_mode == "trend_follow":
+            ranked["score"] = (
+                (ranked["disparity"].fillna(0).astype(float))
+                + (0.8 * (ranked["ret3"].fillna(0).astype(float)))
+                + (0.05 * np.log1p(ranked["amount"].fillna(0).astype(float).clip(lower=0)))
+            )
+        else:
+            ranked["score"] = (
+                (-ranked["disparity"].fillna(0).astype(float))
+                + (0.8 * (-ranked["ret3"].fillna(0).astype(float)))
+                + (0.05 * np.log1p(ranked["amount"].fillna(0).astype(float).clip(lower=0)))
+            )
+        ranked = ranked.sort_values("score", ascending=False)
+    else:
+        ranked = ranked.sort_values("amount", ascending=False)
+
+    final_rows = []
+    sector_counts: Dict[str, int] = {}
+    try:
+        held = conn.execute(
+            """
+            SELECT p.code,
+                   COALESCE(s.sector_name, u.group_name, '미분류') AS sec
+            FROM position_state p
+            LEFT JOIN sector_map s ON p.code = s.code
+            LEFT JOIN universe_members u ON p.code = u.code
+            """
+        ).fetchall()
+        for code, sec in held:
+            sec = sec or "미분류"
+            sector_counts[sec] = sector_counts.get(sec, 0) + 1
+    except Exception:
+        sector_counts = {}
+
+    skipped_sector: set[str] = set()
+    stop_pos: Optional[int] = None
+    for pos, (_, row) in enumerate(ranked.iterrows()):
+        sec = row.get("sector_name") or "미분류"
+        code = str(row.get("code") or "").strip().upper()
+        if not code:
+            continue
+        if max_per_sector and sector_counts.get(sec, 0) >= max_per_sector:
+            skipped_sector.add(code)
+            continue
+        final_rows.append(row)
+        sector_counts[sec] = sector_counts.get(sec, 0) + 1
+        if len(final_rows) >= max_positions:
+            stop_pos = pos
+            break
+
+    final = pd.DataFrame(final_rows) if final_rows else ranked.head(0).copy()
+    if not final.empty:
+        final["rank"] = range(1, len(final) + 1)
+
+    selected_items: List[Dict[str, Any]] = []
+    if not final.empty:
+        try:
+            for _, row in final.iterrows():
+                code = str(row.get("code") or "").strip().upper()
+                if not code:
+                    continue
+                name = str(row.get("name") or "").strip() or code
+                selected_items.append({"code": code, "name": name})
+        except Exception:
+            selected_items = []
+
+    universe_codes = [str(c).strip().upper() for c in codes if c]
+    universe_set = set(universe_codes)
+    stage_universe_set = set(stage_universe["code"].dropna().astype(str).str.upper().tolist()) if not stage_universe.empty else set()
+    stage_min_amount_set = set(stage_min_amount["code"].dropna().astype(str).str.upper().tolist()) if not stage_min_amount.empty else set()
+    stage_liquidity_set = set(stage_liquidity["code"].dropna().astype(str).str.upper().tolist()) if not stage_liquidity.empty else set()
+    stage_disparity_set = set(stage_disparity["code"].dropna().astype(str).str.upper().tolist()) if not stage_disparity.empty else set()
+    stage_trend_set = set(stage_trend["code"].dropna().astype(str).str.upper().tolist()) if not stage_trend.empty else set()
+    final_set = set(final["code"].dropna().astype(str).str.upper().tolist()) if not final.empty else set()
+
+    # Name lookup fallback.
+    name_map: Dict[str, str] = {}
+    try:
+        for _, r in universe_df.iterrows():
+            code = str(r.get("code") or "").strip().upper()
+            if not code:
+                continue
+            name = str(r.get("name") or "").strip()
+            if name:
+                name_map[code] = name
+    except Exception:
+        name_map = {}
+
+    latest_by_code = {}
+    try:
+        if not latest.empty:
+            latest_by_code = {str(r.get("code") or "").strip().upper(): r for _, r in latest.iterrows()}
+    except Exception:
+        latest_by_code = {}
+
+    def _jfloat(value: Any) -> Optional[float]:
+        if value is None or pd.isna(value):
+            return None
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    def _reason_for(code: str) -> Tuple[str, str]:
+        # Stage order mirrors the dashboard summary logic.
+        if code not in stage_universe_set:
+            return ("data_missing", "가격 데이터 부족")
+        if code not in stage_min_amount_set:
+            return ("min_amount", "거래대금 기준 미달")
+        if code not in stage_liquidity_set:
+            return ("liquidity", "거래대금 상위 순위 밖(유동성 필터)")
+        if code not in stage_disparity_set:
+            return ("disparity", "괴리율(및 모멘텀) 조건 미충족")
+        if code not in stage_trend_set:
+            if not trend_filter:
+                return ("unknown", "이탈")
+            row = latest_by_code.get(code) or {}
+            try:
+                prev = row.get("ma25_prev")
+            except Exception:
+                prev = None
+            if prev is None or pd.isna(prev):
+                return ("trend_ma25_missing", "상승추세(MA25) 데이터 부족")
+            return ("trend_ma25", "상승추세(MA25) 조건 붕괴")
+        if code not in final_set:
+            if code in skipped_sector:
+                return ("sector_cap", "섹터 제한")
+            return ("final_count_cap", "최종 후보 수 제한")
+        return ("selected", "매수 후보")
+
+    eval_map: Dict[str, Any] = {}
+    for code in sorted(universe_set):
+        rc, rt = _reason_for(code)
+        row = latest_by_code.get(code)
+        close = close_prev = close_delta_pct = None
+        if row is not None:
+            try:
+                close = _jfloat(row.get("close"))
+                close_prev = _jfloat(row.get("close_prev"))
+                close_delta_pct = _jfloat(row.get("close_delta_pct"))
+            except Exception:
+                close = close_prev = close_delta_pct = None
+        eval_map[code] = {
+            "code": code,
+            "name": name_map.get(code) or (code),
+            "selected": bool(code in final_set),
+            "reason_code": rc,
+            "reason_text": rt,
+            "close": close,
+            "close_prev": close_prev,
+            "close_delta_pct": close_delta_pct,
+        }
+
+    return {
+        "version": SELECTION_SNAPSHOT_VERSION,
+        "asof_date": asof_date,
+        "strategy_id": strategy_id,
+        "universe_total": universe_total,
+        "selected": selected_items,
+        "eval": eval_map,
+        "note": SELECTION_CHANGES_NOTE,
+    }
+
+
+def _build_selection_changes(
+    conn: sqlite3.Connection,
+    settings: Dict[str, Any],
+    params: Any,
+    toggles: Dict[str, bool],
+    latest_date: Optional[str],
+) -> Dict[str, Any]:
+    """Return recent selection change-log (added/dropped) for UI."""
+    try:
+        days_cfg = int(settings.get("ui", {}).get("selection_change_days", SELECTION_CHANGE_LOG_DAYS))
+    except Exception:
+        days_cfg = SELECTION_CHANGE_LOG_DAYS
+    days = max(1, min(int(days_cfg or SELECTION_CHANGE_LOG_DAYS), int(SELECTION_CHANGE_LOG_MAX_DAYS or 20)))
+    if not latest_date:
+        return {
+            "days": days,
+            "ready": False,
+            "summary": {"added": 0, "dropped": 0},
+            "added": [],
+            "dropped": [],
+            "disclaimer": SELECTION_CHANGES_DISCLAIMER,
+            "note": SELECTION_CHANGES_NOTE,
+        }
+
+    strategy_id = _selection_strategy_id(params, toggles)
+    _ensure_selection_snapshot_schema(conn)
+
+    # Need baseline + window days to compute per-day changes.
+    compare_dates_desc = _fetch_recent_trading_dates(conn, str(latest_date), days + 1)
+    compare_dates = list(reversed(compare_dates_desc))  # oldest -> newest
+    if len(compare_dates) < 2:
+        return {
+            "days": days,
+            "ready": False,
+            "strategy_id": strategy_id,
+            "dates": [],
+            "summary": {"added": 0, "dropped": 0},
+            "added": [],
+            "dropped": [],
+            "disclaimer": SELECTION_CHANGES_DISCLAIMER,
+            "note": SELECTION_CHANGES_NOTE,
+        }
+
+    # Backfill missing snapshots in this window only (fast after first run).
+    for d in compare_dates:
+        if _selection_snapshot_exists(conn, d, strategy_id):
+            continue
+        snap = _compute_selection_snapshot_for_date(conn, params, toggles, d, strategy_id)
+        _store_selection_snapshot(conn, snap)
+
+    snapshots: Dict[str, Dict[str, Any]] = {}
+    for d in compare_dates:
+        snap: Optional[Dict[str, Any]] = None
+        try:
+            row = conn.execute(
+                f"SELECT snapshot_json FROM {SELECTION_SNAPSHOT_TABLE} WHERE asof_date=? AND strategy_id=?",
+                (d, strategy_id),
+            ).fetchone()
+            if row and row[0]:
+                parsed = json.loads(row[0])
+                if isinstance(parsed, dict):
+                    snap = parsed
+        except Exception:
+            snap = None
+
+        if not snap or int(snap.get("version") or 0) != SELECTION_SNAPSHOT_VERSION:
+            try:
+                snap = _compute_selection_snapshot_for_date(conn, params, toggles, d, strategy_id)
+                _store_selection_snapshot(conn, snap)
+            except Exception:
+                logging.exception("failed to rebuild snapshot %s/%s", d, strategy_id)
+                snap = snap or {}
+
+        if snap:
+            snapshots[d] = snap
+
+    added_events: List[Dict[str, Any]] = []
+    dropped_events: List[Dict[str, Any]] = []
+
+    for i in range(1, len(compare_dates)):
+        d = compare_dates[i]
+        prev = compare_dates[i - 1]
+        cur = snapshots.get(d) or {}
+        prev_snap = snapshots.get(prev) or {}
+
+        cur_selected = {str(x.get("code") or "").strip().upper() for x in (cur.get("selected") or []) if x and x.get("code")}
+        prev_selected = {str(x.get("code") or "").strip().upper() for x in (prev_snap.get("selected") or []) if x and x.get("code")}
+        if not cur_selected and not prev_selected:
+            continue
+
+        cur_eval = cur.get("eval") or {}
+        prev_eval = prev_snap.get("eval") or {}
+
+        for code in sorted(cur_selected - prev_selected):
+            ev = cur_eval.get(code) or prev_eval.get(code) or {}
+            name = str(ev.get("name") or "").strip() or code
+            added_events.append({"date": d, "code": code, "name": name})
+
+        for code in sorted(prev_selected - cur_selected):
+            ev = cur_eval.get(code) or prev_eval.get(code) or {}
+            name = str(ev.get("name") or "").strip() or code
+            reason_text = str(ev.get("reason_text") or "").strip() or "이탈"
+            reason_code = str(ev.get("reason_code") or "").strip() or "unknown"
+            dropped_events.append(
+                {
+                    "date": d,
+                    "code": code,
+                    "name": name,
+                    "reason": reason_text,
+                    "reason_code": reason_code,
+                    "close_delta_pct": ev.get("close_delta_pct"),
+                }
+            )
+
+    def _sort_key(ev: Dict[str, Any]) -> Tuple[str, str]:
+        # date desc (string YYYY-MM-DD), code asc
+        return (str(ev.get("date") or ""), str(ev.get("code") or ""))
+
+    added_events = sorted(added_events, key=_sort_key, reverse=True)
+    dropped_events = sorted(dropped_events, key=_sort_key, reverse=True)
+
+    return {
+        "days": days,
+        "ready": True,
+        "strategy_id": strategy_id,
+        "dates": compare_dates[1:],  # window dates (exclude baseline)
+        "summary": {"added": len(added_events), "dropped": len(dropped_events)},
+        "added": added_events,
+        "dropped": dropped_events,
+        "disclaimer": SELECTION_CHANGES_DISCLAIMER,
+        "note": SELECTION_CHANGES_NOTE,
+    }
+
+
 def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any]) -> Dict[str, Any]:
     """Selection summary used by the dashboard (selection-only)."""
     params = load_strategy(settings)
@@ -1354,7 +1971,15 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
     universe_total = int(len(universe_df))
     codes = universe_df["code"].dropna().astype(str).tolist()
     if not codes:
-        return {"date": None, "candidates": [], "stages": [], "pricing": {}, "stage_items": {}, "filter_toggles": toggles}
+        return {
+            "date": None,
+            "candidates": [],
+            "stages": [],
+            "pricing": {},
+            "stage_items": {},
+            "filter_toggles": toggles,
+            "changes": _build_selection_changes(conn, settings, params, toggles, None),
+        }
 
     rows: List[Tuple[Any, ...]] = []
     sql = """
@@ -1368,7 +1993,15 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
         rows.extend(conn.execute(sql, (code,)).fetchall())
     df = pd.DataFrame(rows, columns=["code", "date", "close", "amount", "ma25", "disparity"])
     if df.empty:
-        return {"date": None, "candidates": [], "stages": [], "pricing": {}, "stage_items": {}, "filter_toggles": toggles}
+        return {
+            "date": None,
+            "candidates": [],
+            "stages": [],
+            "pricing": {},
+            "stage_items": {},
+            "filter_toggles": toggles,
+            "changes": _build_selection_changes(conn, settings, params, toggles, None),
+        }
 
     df = df.sort_values(["code", "date"])
     df["ma25_prev"] = df.groupby("code")["ma25"].shift(1)
@@ -1489,12 +2122,14 @@ def _build_selection_summary(conn: sqlite3.Connection, settings: Dict[str, Any])
         "final": _items(final),
     }
 
+    changes = _build_selection_changes(conn, settings, params, toggles, latest_date)
     return {
         "date": latest_date,
         "candidates": candidates,
         "stages": stages,
         "stage_items": stage_items,
         "filter_toggles": toggles,
+        "changes": changes,
     }
 
 

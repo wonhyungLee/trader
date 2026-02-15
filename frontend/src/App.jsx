@@ -415,6 +415,24 @@ function App() {
   const selectionStages = asArray(selection?.stages)
   const selectionStageItems = selection?.stage_items && typeof selection.stage_items === 'object' ? selection.stage_items : {}
   const selectionCandidates = asArray(selection?.candidates)
+  const selectionChanges = selection?.changes && typeof selection.changes === 'object' ? selection.changes : null
+  const changeDays = Number(selectionChanges?.days) || 5
+  const changeSummary = selectionChanges?.summary && typeof selectionChanges.summary === 'object' ? selectionChanges.summary : {}
+  const changeAddedRaw = asArray(selectionChanges?.added)
+  const changeDroppedRaw = asArray(selectionChanges?.dropped)
+  const changeAddedCount = Number.isFinite(Number(changeSummary.added)) ? Number(changeSummary.added) : changeAddedRaw.length
+  const changeDroppedCount = Number.isFinite(Number(changeSummary.dropped)) ? Number(changeSummary.dropped) : changeDroppedRaw.length
+
+  const sortEventsDesc = useCallback((items) => {
+    const arr = asArray(items)
+      .filter((x) => x && x.date && x.code)
+      .map((x) => ({ ...x, date: String(x.date), code: String(x.code).toUpperCase() }))
+    arr.sort((a, b) => (b.date.localeCompare(a.date) || a.code.localeCompare(b.code)))
+    return arr
+  }, [])
+
+  const changeAdded = useMemo(() => sortEventsDesc(changeAddedRaw), [changeAddedRaw, sortEventsDesc])
+  const changeDropped = useMemo(() => sortEventsDesc(changeDroppedRaw), [changeDroppedRaw, sortEventsDesc])
 
   const handleFilterToggle = async (key) => {
     const password = window.prompt('필터 토글 비밀번호를 입력하세요')
@@ -557,6 +575,14 @@ function App() {
       .filter((row) => row && row.code)
       .map((row, idx) => ({ ...row, rank: row.rank || (idx + 1) }))
   }, [selectionCandidates, finalStage])
+  const finalCandidateCodeSet = useMemo(() => {
+    const set = new Set()
+    finalCandidates.forEach((row) => {
+      if (!row?.code) return
+      set.add(String(row.code).toUpperCase())
+    })
+    return set
+  }, [finalCandidates])
   const finalCount = finalStage?.count || finalCandidates.length
 
   const refreshLabel = lastUpdated
@@ -972,6 +998,68 @@ function App() {
                   ))}
                   {finalCandidates.length === 0 && <div className="empty">매수 후보가 없습니다.</div>}
                 </div>
+              </div>
+            ) : null}
+
+            {selectionChanges ? (
+              <div className="changes-board" aria-label="추천 변동">
+                <div className="changes-head">
+                  <div>
+                    <div className="changes-title">추천 변동 (최근 {changeDays}일)</div>
+                    <div className="changes-count">신규 {changeAddedCount} · 이탈 {changeDroppedCount}</div>
+                  </div>
+                </div>
+                <div className="changes-disclaimer">
+                  {selectionChanges?.disclaimer || '매수 후보(Selection)는 "지금 기준 신규 진입 후보"입니다. 후보에서 사라지는 것은 자동 매도 신호가 아닐 수 있으니, 아래의 이탈 사유(조건/랭킹)를 확인하세요.'}
+                </div>
+                <div className="changes-legend">
+                  <strong className="changes-legend-strong">빨간색</strong>은 이탈 사유가 아니라 <strong className="changes-legend-strong">이탈일 종가 하락(주의)</strong>을 뜻합니다.
+                  신규/이탈은 전일 대비 변동이며, 동일 종목이 이탈 후 다시 포함될 수 있습니다.
+                  보유 중이면 리스크를 즉시 점검하세요. (즉시 매도 신호 아님)
+                </div>
+                <div className="changes-grid">
+                  <div className="changes-col">
+                    <div className="changes-col-title">신규(재진입 포함)</div>
+                    <div className="changes-list">
+                      {changeAdded.length ? changeAdded.map((row, idx) => (
+                        <div key={`chg-add-${row.date}-${row.code}-${idx}`} className="changes-row">
+                          <span className="mono">{row.date}</span>
+                          <span className="mono">{row.code}</span>
+                          <span className="changes-name">{row.name || '-'}</span>
+                          {finalCandidateCodeSet.has(String(row.code || '').toUpperCase()) ? (
+                            <span className="changes-now-badge">현재 포함</span>
+                          ) : null}
+                        </div>
+                      )) : <div className="empty">신규 종목이 없습니다.</div>}
+                    </div>
+                  </div>
+                  <div className="changes-col">
+                    <div className="changes-col-title">이탈</div>
+                    <div className="changes-list">
+                      {changeDropped.length ? changeDropped.map((row, idx) => {
+                        const code = String(row?.code || '').toUpperCase()
+                        const pct = Number(row?.close_delta_pct)
+                        const pctOk = Number.isFinite(pct)
+                        const isDown = pctOk && pct < 0
+                        const isNowIn = finalCandidateCodeSet.has(code)
+                        return (
+                          <div key={`chg-drop-${row.date}-${row.code}-${idx}`} className={`changes-row ${isDown ? 'risk' : ''}`}>
+                            <span className="mono">{row.date}</span>
+                            <span className="mono">{code}</span>
+                            <span className="changes-name">{row.name || '-'}</span>
+                            {pctOk ? (
+                              <span className={`changes-delta ${isDown ? 'down' : 'up'}`}>{formatPct(pct)}</span>
+                            ) : null}
+                            {isDown ? <span className="changes-risk-badge">하락 동반</span> : null}
+                            {isNowIn ? <span className="changes-now-badge">현재 포함</span> : null}
+                            <span className="changes-reason">({row.reason || row.reason_text || '-'})</span>
+                          </div>
+                        )
+                      }) : <div className="empty">이탈 종목이 없습니다.</div>}
+                    </div>
+                  </div>
+                </div>
+                <div className="changes-footnote">{selectionChanges?.note || '이탈 사유는 해당 날짜 기준 전략 조건으로 판정했습니다.'}</div>
               </div>
             ) : null}
           </section>
