@@ -6,7 +6,11 @@ import {
   fetchSelection,
   fetchSelectionFilters,
   updateSelectionFilterToggle,
-  overrideSector
+  overrideSector,
+  fetchAutotradeRecommend,
+  fetchAutotradeWatchlist,
+  setAutotradeWatchlist,
+  removeAutotradeWatchlist
 } from './api'
 import CoupangBanner from './CoupangBanner'
 import {
@@ -138,6 +142,10 @@ function App() {
   const [analysisLoadingProgress, setAnalysisLoadingProgress] = useState(0)
   const [analysisLoading, setAnalysisLoading] = useState(false)
   const [openHelp, setOpenHelp] = useState(null)
+  const [autotradeRec, setAutotradeRec] = useState(null)
+  const [autotradeRecLoading, setAutotradeRecLoading] = useState(false)
+  const [autotradeWatchlist, setAutotradeWatchlistState] = useState([])
+  const [autotradeError, setAutotradeError] = useState('')
 
   const loadData = () => {
     fetchUniverse().then((data) => setUniverse(asArray(data)))
@@ -165,6 +173,9 @@ function App() {
         disparity: payload.disparity !== false,
       })
     }).catch(() => {})
+    fetchAutotradeWatchlist()
+      .then((data) => setAutotradeWatchlistState(asArray(data)))
+      .catch(() => setAutotradeWatchlistState([]))
     setLastUpdated(new Date())
   }
 
@@ -252,6 +263,33 @@ function App() {
     let mounted = true
     const code = selected?.code
     if (!code) return
+    setAutotradeRec(null)
+    setAutotradeError('')
+    setAutotradeRecLoading(true)
+    fetchAutotradeRecommend(code)
+      .then((data) => {
+        if (!mounted) return
+        setAutotradeRec(data && typeof data === 'object' ? data : null)
+      })
+      .catch(() => {
+        if (!mounted) return
+        setAutotradeRec(null)
+        setAutotradeError('자동매매 엔진 데이터 로드 실패')
+      })
+      .finally(() => {
+        if (!mounted) return
+        setAutotradeRecLoading(false)
+      })
+    return () => {
+      mounted = false
+    }
+  }, [selected, modalOpen])
+
+  useEffect(() => {
+    if (!selected || !modalOpen) return
+    let mounted = true
+    const code = selected?.code
+    if (!code) return
     const loadCurrentPrice = () => {
       setCurrentPriceLoading(true)
       fetchCurrentPrice(code)
@@ -293,12 +331,49 @@ function App() {
       setSectorOverrideValue('')
       setSectorOverrideSaving(false)
       setSectorOverrideError('')
+      setAutotradeRec(null)
+      setAutotradeRecLoading(false)
+      setAutotradeError('')
       if (analysisTimerRef.current) {
         clearInterval(analysisTimerRef.current)
         analysisTimerRef.current = null
       }
     }
   }, [modalOpen])
+
+  const selectedAutotrade = useMemo(() => {
+    const code = String(selected?.code || '').toUpperCase()
+    if (!code) return null
+    return asArray(autotradeWatchlist).find((r) => String(r?.code || '').toUpperCase() === code) || null
+  }, [autotradeWatchlist, selected])
+
+  const handleAutotradeSet = useCallback(async (listType) => {
+    if (!selected?.code) return
+    const password = window.prompt('자동매매 비밀번호를 입력하세요')
+    if (!password) return
+    setAutotradeError('')
+    try {
+      await setAutotradeWatchlist(selected.code, listType, true, password)
+      const wl = await fetchAutotradeWatchlist()
+      setAutotradeWatchlistState(asArray(wl))
+    } catch {
+      setAutotradeError('자동매매 목록 저장 실패 (비밀번호 확인)')
+    }
+  }, [selected])
+
+  const handleAutotradeRemove = useCallback(async () => {
+    if (!selected?.code) return
+    const password = window.prompt('자동매매 비밀번호를 입력하세요')
+    if (!password) return
+    setAutotradeError('')
+    try {
+      await removeAutotradeWatchlist(selected.code, password)
+      const wl = await fetchAutotradeWatchlist()
+      setAutotradeWatchlistState(asArray(wl))
+    } catch {
+      setAutotradeError('자동매매 목록 해제 실패 (비밀번호 확인)')
+    }
+  }, [selected])
 
   useEffect(() => {
     if (!modalOpen) setZoomArmed(false)
@@ -1195,6 +1270,49 @@ function App() {
                   <div className="delta-label">Current Price {currentPriceLoading ? '· 업데이트 중' : ''}</div>
                   <div className="delta-value">{formatCurrency(livePriceValue)}</div>
                   <div className="delta-sub">{formatPct(liveChangePct)} · {formatTime(liveAsOfLabel)} · {String(liveSourceLabel).toUpperCase()}</div>
+                </div>
+              </div>
+              <div className="chart-card autotrade-card">
+                <div className="chart-title">Auto Trade Engine</div>
+                <div className="autotrade-meta">
+                  <span>기준일 {autotradeRec?.snapshot?.date || '-'}</span>
+                  <span>상태 {autotradeRec?.status || '-'}</span>
+                  <span>신뢰 {Number.isFinite(Number(autotradeRec?.confidence)) ? `${Number(autotradeRec.confidence).toFixed(1)}%` : '-'}</span>
+                  <span>목록 {selectedAutotrade ? `${selectedAutotrade.list_type} · ${selectedAutotrade.enabled ? 'ON' : 'OFF'}` : 'OFF'}</span>
+                </div>
+                {autotradeRecLoading ? (
+                  <div className="empty">엔진 계산 중...</div>
+                ) : autotradeRec && autotradeRec.ok && autotradeRec.plan ? (
+                  <div className="autotrade-prices">
+                    <div className="autotrade-price">
+                      <span>매수(진입)</span>
+                      <b>{formatCurrency(autotradeRec.plan.entry_price)}</b>
+                    </div>
+                    <div className="autotrade-price">
+                      <span>매도(목표)</span>
+                      <b>{formatCurrency(autotradeRec.plan.target_price)}</b>
+                    </div>
+                    <div className="autotrade-price">
+                      <span>손절</span>
+                      <b>{formatCurrency(autotradeRec.plan.stop_price)}</b>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="empty">엔진 결과가 없습니다.</div>
+                )}
+                <div className="autotrade-actions">
+                  <button className="autotrade-btn" onClick={() => handleAutotradeSet('SELECTED')}>
+                    선정목록(매수)
+                  </button>
+                  <button className="autotrade-btn" onClick={() => handleAutotradeSet('EXIT')}>
+                    이탈목록(매도)
+                  </button>
+                  <button className="autotrade-btn danger" onClick={handleAutotradeRemove} disabled={!selectedAutotrade}>
+                    해제
+                  </button>
+                  {autotradeError ? (
+                    <span className="autotrade-error">{autotradeError}</span>
+                  ) : null}
                 </div>
               </div>
               {analysisLoading ? (

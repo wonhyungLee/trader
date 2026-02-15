@@ -82,10 +82,30 @@ watchdog:
   interval_sec: 900
   daily_min_missing: 1
   daily_limit: 0
-  daily_stale_days: 1
+  daily_stale_days: 2
   daily_chunk_days: 90
   daily_cooldown_sec: 1800
+  invalid_latest_enabled: true
+  invalid_latest_amount_threshold: 0
+  invalid_latest_volume_threshold: 0
+  daily_codes_file: "data/csv/watchdog_daily_codes.csv"
   refill_chunk_days: 150
   refill_sleep_sec: 0.1
   refill_max_missing_per_cycle: 1
   refill_cooldown_sec: 120
+
+# 자동매매(웹훅) - 기본 OFF (worker 프로세스로 구동 권장)
+autotrade:
+  enabled: false
+  # 실발주 스위치. enabled=true라도 send_enabled=false면 웹훅 발송을 하지 않습니다.
+  send_enabled: false
+  # 자동매매정보 파일에서 기본값을 파싱합니다. (webhook_url/password 등)
+  info_path: "/home/ubuntu/자동매매정보2.txt"
+  webhook_url: ""
+  password: "${AUTOTRADE_WEBHOOK_PASSWORD}"
+  kis_number: "${AUTOTRADE_KIS_NUMBER}"
+  default_amount: 1
+  poll_interval_sec: 60
+  # 엔진 per-code 그리드서치(느림). watchlist가 작을 때만 권장.
+  optimize: true
+  optimize_lookback_bars: 2000

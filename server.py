@@ -22,10 +22,11 @@ from flask import Flask, jsonify, request, send_from_directory, abort
 from flask_cors import CORS
 
 from src.analyzer.backtest_runner import load_strategy
-from src.storage.sqlite_store import SQLiteStore
+from src.storage.sqlite_store import SQLiteStore, normalize_code
 from src.utils.config import load_settings, list_kis_key_inventory, set_kis_key_enabled
 from src.utils.db_exporter import maybe_export_db
 from src.utils.project_root import ensure_repo_root
+from src.autotrade.engine_adapter import recommend_daytrade_plan
 
 ensure_repo_root(Path(__file__).resolve().parent)
 
@@ -43,11 +44,16 @@ WATCHDOG_DAILY_CODES_FILE = Path(WATCHDOG_CFG.get("daily_codes_file", "data/csv/
 # Admin password for endpoints that mutate server state (filter toggles, sector overrides, etc).
 # Do NOT hardcode secrets in git; configure via environment or a local .env (ignored).
 KIS_TOGGLE_PASSWORD = os.getenv("KIS_TOGGLE_PASSWORD", "").strip()
+AUTOTRADE_API_PASSWORD = os.getenv("AUTOTRADE_API_PASSWORD", "").strip()
 FILTER_TOGGLE_PATH = Path("data/selection_filter_toggles.json")
 FILTER_TOGGLE_KEYS = ("min_amount", "liquidity", "disparity")
 
 _store = SQLiteStore(str(DB_PATH))
 _store.conn.close()
+
+AUTOTRADE_CFG = SETTINGS.get("autotrade", {}) or {}
+LIST_SELECTED = "SELECTED"
+LIST_EXIT = "EXIT"
 
 _balance_cache: Dict[str, Any] = {"ts": 0.0, "data": None}
 _selection_cache: Dict[str, Any] = {"ts": 0.0, "data": None}
@@ -247,6 +253,12 @@ def _check_password(password: Optional[str]) -> bool:
     if not KIS_TOGGLE_PASSWORD:
         return False
     return bool(password) and password == KIS_TOGGLE_PASSWORD
+
+
+def _check_autotrade_password(password: Optional[str]) -> bool:
+    if AUTOTRADE_API_PASSWORD:
+        return bool(password) and password == AUTOTRADE_API_PASSWORD
+    return _check_password(password)
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -2178,6 +2190,217 @@ def selection_filters_toggle():
     toggles = _load_filter_toggles()
     toggles[key] = enabled
     return jsonify(_save_filter_toggles(toggles))
+
+
+def _autotrade_optimize_default() -> bool:
+    try:
+        return bool(AUTOTRADE_CFG.get("optimize", True))
+    except Exception:
+        return True
+
+
+def _autotrade_lookback_default() -> Optional[int]:
+    try:
+        v = AUTOTRADE_CFG.get("optimize_lookback_bars")
+        return int(v) if v is not None else None
+    except Exception:
+        return None
+
+
+@app.get("/autotrade/recommend")
+def autotrade_recommend():
+    """Return next-day entry/stop/target from stock_daytrade_engine (daily bars)."""
+    code = str(request.args.get("code") or "").strip().upper()
+    if not code:
+        return jsonify({"ok": False, "error": "code is required"}), 400
+
+    optimize_raw = request.args.get("optimize")
+    if optimize_raw is None:
+        optimize = _autotrade_optimize_default()
+    else:
+        optimize = str(optimize_raw).strip().lower() not in {"0", "false", "no"}
+
+    lookback_raw = request.args.get("lookback")
+    lookback = _autotrade_lookback_default()
+    if lookback_raw is not None:
+        try:
+            lookback = int(lookback_raw)
+        except Exception:
+            lookback = lookback
+
+    rec = recommend_daytrade_plan(
+        db_path=str(DB_PATH),
+        code=code,
+        optimize=bool(optimize),
+        optimize_lookback_bars=lookback,
+    )
+
+    if rec.get("ok"):
+        snap = rec.get("snapshot") or {}
+        plan = rec.get("plan") or {}
+        asof_date = str(snap.get("date") or "")
+        try:
+            conn = get_conn()
+            now = datetime.utcnow().isoformat()
+            conn.execute(
+                """
+                INSERT INTO autotrade_plans(
+                    asof_date, code, entry_price, target_price, stop_price, confidence, status, plan_json, created_at, updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(asof_date, code) DO UPDATE SET
+                    entry_price=excluded.entry_price,
+                    target_price=excluded.target_price,
+                    stop_price=excluded.stop_price,
+                    confidence=excluded.confidence,
+                    status=excluded.status,
+                    plan_json=excluded.plan_json,
+                    updated_at=excluded.updated_at;
+                """,
+                (
+                    asof_date,
+                    normalize_code(code),
+                    _safe_float(plan.get("entry_price")),
+                    _safe_float(plan.get("target_price")),
+                    _safe_float(plan.get("stop_price")),
+                    _safe_float(rec.get("confidence")),
+                    str(rec.get("status") or ""),
+                    json.dumps(rec, ensure_ascii=False, default=str),
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+        except Exception:
+            # Recommendation should still return; DB write is best-effort.
+            logging.exception("failed to upsert autotrade plan for %s", code)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    return jsonify(rec)
+
+
+@app.get("/autotrade/watchlist")
+def autotrade_watchlist():
+    conn = get_conn()
+    try:
+        df = pd.read_sql_query(
+            """
+            SELECT code, name, market, excd, list_type, enabled, created_at, updated_at
+            FROM autotrade_watchlist
+            ORDER BY updated_at DESC
+            """,
+            conn,
+        )
+    except Exception:
+        return jsonify([])
+    finally:
+        conn.close()
+    df = df.replace([np.inf, -np.inf], np.nan)
+    df = df.astype(object).where(pd.notnull(df), None)
+    return jsonify(df.to_dict(orient="records"))
+
+
+@app.post("/autotrade/watchlist/set")
+def autotrade_watchlist_set():
+    payload = request.get_json(silent=True) or {}
+    password = payload.get("password")
+    if not _check_autotrade_password(password):
+        return jsonify({"error": "invalid password"}), 403
+
+    code = normalize_code(payload.get("code"))
+    list_type = str(payload.get("list_type") or LIST_SELECTED).strip().upper()
+    enabled = bool(payload.get("enabled", True))
+    if not code:
+        return jsonify({"error": "code required"}), 400
+    if list_type not in {LIST_SELECTED, LIST_EXIT}:
+        return jsonify({"error": "invalid list_type"}), 400
+
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT name, market, excd FROM universe_members WHERE code=?", (code,)).fetchone()
+        name = str(payload.get("name") or (row[0] if row else "") or "").strip()
+        market = str(payload.get("market") or (row[1] if row else "") or "").strip()
+        excd = str(payload.get("excd") or (row[2] if row else "") or "").strip()
+        now = datetime.utcnow().isoformat()
+        conn.execute(
+            """
+            INSERT INTO autotrade_watchlist(code, name, market, excd, list_type, enabled, created_at, updated_at)
+            VALUES(?,?,?,?,?,?,?,?)
+            ON CONFLICT(code) DO UPDATE SET
+                name=excluded.name,
+                market=excluded.market,
+                excd=excluded.excd,
+                list_type=excluded.list_type,
+                enabled=excluded.enabled,
+                updated_at=excluded.updated_at;
+            """,
+            (code, name, market, excd, list_type, int(enabled), now, now),
+        )
+        conn.commit()
+        out = conn.execute(
+            "SELECT code, name, market, excd, list_type, enabled, created_at, updated_at FROM autotrade_watchlist WHERE code=?",
+            (code,),
+        ).fetchone()
+        return jsonify(dict(out) if out else {"code": code, "list_type": list_type, "enabled": enabled})
+    finally:
+        conn.close()
+
+
+@app.post("/autotrade/watchlist/remove")
+def autotrade_watchlist_remove():
+    payload = request.get_json(silent=True) or {}
+    password = payload.get("password")
+    if not _check_autotrade_password(password):
+        return jsonify({"error": "invalid password"}), 403
+    code = normalize_code(payload.get("code"))
+    if not code:
+        return jsonify({"error": "code required"}), 400
+    conn = get_conn()
+    try:
+        conn.execute("DELETE FROM autotrade_watchlist WHERE code=?", (code,))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({"ok": True, "code": code})
+
+
+@app.get("/autotrade/queue")
+def autotrade_queue():
+    code = str(request.args.get("code") or "").strip().upper()
+    conn = get_conn()
+    try:
+        if code:
+            df = pd.read_sql_query(
+                """
+                SELECT id, asof_date, code, side, trigger_price, trigger_rule, status, attempt_count, last_attempt_at, sent_at, last_error, updated_at
+                FROM autotrade_queue
+                WHERE code=?
+                ORDER BY asof_date DESC, id DESC
+                LIMIT 200
+                """,
+                conn,
+                params=(normalize_code(code),),
+            )
+        else:
+            df = pd.read_sql_query(
+                """
+                SELECT id, asof_date, code, side, trigger_price, trigger_rule, status, attempt_count, last_attempt_at, sent_at, last_error, updated_at
+                FROM autotrade_queue
+                ORDER BY asof_date DESC, id DESC
+                LIMIT 200
+                """,
+                conn,
+            )
+    except Exception:
+        return jsonify([])
+    finally:
+        conn.close()
+    df = df.replace([np.inf, -np.inf], np.nan)
+    df = df.astype(object).where(pd.notnull(df), None)
+    return jsonify(df.to_dict(orient="records"))
 
 
 def _list_known_sectors(conn: sqlite3.Connection) -> List[str]:

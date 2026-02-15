@@ -218,6 +218,71 @@ SCHEMA = {
             removed_codes_json TEXT
         );
     """,
+    # ---------- auto trading (webhook-based) ----------
+    "autotrade_watchlist": """
+        CREATE TABLE IF NOT EXISTS autotrade_watchlist (
+            code TEXT PRIMARY KEY,
+            name TEXT,
+            market TEXT,
+            excd TEXT,
+            list_type TEXT,   -- SELECTED | EXIT
+            enabled INTEGER,  -- 0/1
+            created_at TEXT,
+            updated_at TEXT
+        );
+    """,
+    "autotrade_plans": """
+        CREATE TABLE IF NOT EXISTS autotrade_plans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asof_date TEXT,
+            code TEXT,
+            entry_price REAL,
+            target_price REAL,
+            stop_price REAL,
+            confidence REAL,
+            status TEXT,
+            plan_json TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            UNIQUE(asof_date, code)
+        );
+    """,
+    "autotrade_queue": """
+        CREATE TABLE IF NOT EXISTS autotrade_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asof_date TEXT,
+            code TEXT,
+            side TEXT,          -- BUY | SELL
+            trigger_price REAL,
+            trigger_rule TEXT,  -- <= | >=
+            webhook_url TEXT,
+            payload_json TEXT,
+            status TEXT,        -- PENDING | SENDING | SENT | ERROR | SKIPPED
+            attempt_count INTEGER,
+            last_attempt_at TEXT,
+            sent_at TEXT,
+            response_text TEXT,
+            last_error TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            UNIQUE(asof_date, code, side)
+        );
+    """,
+    "autotrade_events": """
+        CREATE TABLE IF NOT EXISTS autotrade_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT,
+            asof_date TEXT,
+            code TEXT,
+            side TEXT,
+            status TEXT,
+            http_status INTEGER,
+            webhook_url TEXT,
+            payload_json TEXT,
+            response_text TEXT,
+            error_text TEXT
+        );
+    """,
 }
 
 INDEXES = [
@@ -236,6 +301,11 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_sector_map_sector ON sector_map(sector_name);",
     "CREATE INDEX IF NOT EXISTS idx_sector_map_updated ON sector_map(updated_at);",
     "CREATE INDEX IF NOT EXISTS idx_universe_changes_date ON universe_changes(snapshot_date);",
+    "CREATE INDEX IF NOT EXISTS idx_autotrade_watchlist_type_enabled ON autotrade_watchlist(list_type, enabled);",
+    "CREATE INDEX IF NOT EXISTS idx_autotrade_plans_code_date ON autotrade_plans(code, asof_date);",
+    "CREATE INDEX IF NOT EXISTS idx_autotrade_queue_status ON autotrade_queue(status);",
+    "CREATE INDEX IF NOT EXISTS idx_autotrade_queue_asof_code ON autotrade_queue(asof_date, code);",
+    "CREATE INDEX IF NOT EXISTS idx_autotrade_events_code_ts ON autotrade_events(code, ts);",
 ]
 
 
@@ -649,6 +719,196 @@ class SQLiteStore:
         sql = f"UPDATE order_queue SET {', '.join(fields)} WHERE id=?"
         params.append(order_id)
         self.conn.execute(sql, tuple(params))
+        self.conn.commit()
+
+    # ---------- autotrade_watchlist ----------
+    def upsert_autotrade_watchlist(
+        self,
+        code: str,
+        *,
+        name: str = "",
+        market: str = "",
+        excd: str = "",
+        list_type: str = "SELECTED",
+        enabled: bool = True,
+    ) -> None:
+        now = datetime.utcnow().isoformat()
+        code = normalize_code(code)
+        self.conn.execute(
+            """
+            INSERT INTO autotrade_watchlist(
+                code, name, market, excd, list_type, enabled, created_at, updated_at
+            ) VALUES(?,?,?,?,?,?,?,?)
+            ON CONFLICT(code) DO UPDATE SET
+                name=excluded.name,
+                market=excluded.market,
+                excd=excluded.excd,
+                list_type=excluded.list_type,
+                enabled=excluded.enabled,
+                updated_at=excluded.updated_at;
+            """,
+            (
+                code,
+                name or "",
+                market or "",
+                excd or "",
+                str(list_type or "SELECTED").upper(),
+                int(bool(enabled)),
+                now,
+                now,
+            ),
+        )
+        self.conn.commit()
+
+    def remove_autotrade_watchlist(self, code: str) -> None:
+        code = normalize_code(code)
+        self.conn.execute("DELETE FROM autotrade_watchlist WHERE code=?", (code,))
+        self.conn.commit()
+
+    def list_autotrade_watchlist(
+        self,
+        *,
+        list_type: Optional[str] = None,
+        enabled_only: bool = True,
+    ) -> List[sqlite3.Row]:
+        query = "SELECT * FROM autotrade_watchlist WHERE 1=1"
+        params: List[Any] = []
+        if list_type:
+            query += " AND list_type=?"
+            params.append(str(list_type).upper())
+        if enabled_only:
+            query += " AND enabled=1"
+        query += " ORDER BY updated_at DESC"
+        cur = self.conn.execute(query, tuple(params))
+        return cur.fetchall()
+
+    # ---------- autotrade_plans ----------
+    def upsert_autotrade_plan(
+        self,
+        *,
+        asof_date: str,
+        code: str,
+        entry_price: Optional[float],
+        target_price: Optional[float],
+        stop_price: Optional[float],
+        confidence: Optional[float],
+        status: str,
+        plan_json: str,
+    ) -> None:
+        now = datetime.utcnow().isoformat()
+        code = normalize_code(code)
+        self.conn.execute(
+            """
+            INSERT INTO autotrade_plans(
+                asof_date, code, entry_price, target_price, stop_price, confidence, status, plan_json, created_at, updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(asof_date, code) DO UPDATE SET
+                entry_price=excluded.entry_price,
+                target_price=excluded.target_price,
+                stop_price=excluded.stop_price,
+                confidence=excluded.confidence,
+                status=excluded.status,
+                plan_json=excluded.plan_json,
+                updated_at=excluded.updated_at;
+            """,
+            (
+                str(asof_date),
+                code,
+                entry_price,
+                target_price,
+                stop_price,
+                confidence,
+                status,
+                plan_json,
+                now,
+                now,
+            ),
+        )
+        self.conn.commit()
+
+    # ---------- autotrade_queue ----------
+    def upsert_autotrade_queue(
+        self,
+        *,
+        asof_date: str,
+        code: str,
+        side: str,
+        trigger_price: Optional[float],
+        trigger_rule: str,
+        webhook_url: str,
+        payload_json: str,
+        status: str = "PENDING",
+    ) -> None:
+        now = datetime.utcnow().isoformat()
+        code = normalize_code(code)
+        self.conn.execute(
+            """
+            INSERT INTO autotrade_queue(
+                asof_date, code, side, trigger_price, trigger_rule, webhook_url, payload_json,
+                status, attempt_count, last_attempt_at, sent_at, response_text, last_error,
+                created_at, updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(asof_date, code, side) DO UPDATE SET
+                trigger_price=excluded.trigger_price,
+                trigger_rule=excluded.trigger_rule,
+                webhook_url=excluded.webhook_url,
+                payload_json=excluded.payload_json,
+                updated_at=excluded.updated_at;
+            """,
+            (
+                str(asof_date),
+                code,
+                str(side or "").upper(),
+                trigger_price,
+                str(trigger_rule or ""),
+                webhook_url or "",
+                payload_json or "",
+                str(status or "PENDING").upper(),
+                0,
+                None,
+                None,
+                None,
+                None,
+                now,
+                now,
+            ),
+        )
+        self.conn.commit()
+
+    def insert_autotrade_event(
+        self,
+        *,
+        ts: str,
+        asof_date: str,
+        code: str,
+        side: str,
+        status: str,
+        http_status: Optional[int],
+        webhook_url: str,
+        payload_json: str,
+        response_text: str = "",
+        error_text: str = "",
+    ) -> None:
+        code = normalize_code(code)
+        self.conn.execute(
+            """
+            INSERT INTO autotrade_events(
+                ts, asof_date, code, side, status, http_status, webhook_url, payload_json, response_text, error_text
+            ) VALUES(?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                ts,
+                str(asof_date),
+                code,
+                str(side or "").upper(),
+                str(status or "").upper(),
+                int(http_status) if http_status is not None else None,
+                webhook_url or "",
+                payload_json or "",
+                response_text or "",
+                error_text or "",
+            ),
+        )
         self.conn.commit()
 
     # ---------- position_state ----------

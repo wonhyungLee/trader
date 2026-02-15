@@ -22,3 +22,16 @@ export const updateSelectionFilterToggle = (key, enabled, password) =>
 
 export const overrideSector = (code, sector_name, password) =>
   api.post('/sector_override', { code, sector_name, password }).then(r => r.data);
+
+// Auto-trade (webhook)
+export const fetchAutotradeRecommend = (code, params = {}) =>
+  api.get('/autotrade/recommend', { params: { code, ...params } }).then(r => r.data);
+
+export const fetchAutotradeWatchlist = () =>
+  api.get('/autotrade/watchlist').then(r => r.data);
+
+export const setAutotradeWatchlist = (code, list_type, enabled, password) =>
+  api.post('/autotrade/watchlist/set', { code, list_type, enabled, password }).then(r => r.data);
+
+export const removeAutotradeWatchlist = (code, password) =>
+  api.post('/autotrade/watchlist/remove', { code, password }).then(r => r.data);
