@@ -96,9 +96,9 @@ watchdog:
 
 # 자동매매(웹훅) - 기본 OFF (worker 프로세스로 구동 권장)
 autotrade:
-  enabled: false
+  enabled: true
   # 실발주 스위치. enabled=true라도 send_enabled=false면 웹훅 발송을 하지 않습니다.
-  send_enabled: false
+  send_enabled: true
   # 자동매매정보 파일에서 기본값을 파싱합니다. (webhook_url/password 등)
   info_path: "/home/ubuntu/자동매매정보2.txt"
   webhook_url: ""
@@ -106,6 +106,16 @@ autotrade:
   kis_number: "${AUTOTRADE_KIS_NUMBER}"
   default_amount: 1
   poll_interval_sec: 60
+  # Selection 결과를 주기적으로 동기화하여 수동 watchlist 드리프트를 줄입니다.
+  sync_selection_enabled: true
+  sync_selection_interval_sec: 300
+  sync_selection_max_codes: 20
+  # Selection에서 빠진 BUY 대기/실패 큐는 자동 취소 처리합니다.
+  cancel_missing_selected: true
+  # 이탈(SELL) 자동큐는 생성/발송하지 않습니다.
+  generate_sell_queue: false
+  # 지난 큐 정리 보존일(일): EXPIRED/CANCELLED 큐 삭제 기준.
+  purge_expired_after_days: 1
   # 엔진 per-code 그리드서치(느림). watchlist가 작을 때만 권장.
   optimize: true
   optimize_lookback_bars: 2000

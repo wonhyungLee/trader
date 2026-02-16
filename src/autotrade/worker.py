@@ -3,10 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -15,6 +16,7 @@ from src.autotrade.engine_adapter import recommend_daytrade_plan
 from src.autotrade.info_loader import AutoTradeInfo, load_autotrade_info
 from src.autotrade.payloads import build_limit_order, infer_exchange, infer_quote_currency
 from src.autotrade.price_feed import fetch_current_price_us
+from src.analyzer.backtest_runner import load_strategy
 from src.storage.sqlite_store import SQLiteStore, normalize_code
 from src.utils.config import load_settings
 from src.utils.notifier import maybe_notify
@@ -38,6 +40,12 @@ class AutoTradeConfig:
     poll_interval_sec: int
     optimize: bool
     optimize_lookback_bars: Optional[int]
+    sync_selection_enabled: bool
+    sync_selection_interval_sec: int
+    sync_selection_max_codes: int
+    cancel_missing_selected: bool
+    generate_sell_queue: bool
+    purge_expired_after_days: int
 
 
 def utc_ts() -> str:
@@ -61,6 +69,16 @@ def load_autotrade_config(settings: dict) -> AutoTradeConfig:
         optimize_lookback_bars = int(lookback_raw) if lookback_raw is not None else None
     except Exception:
         optimize_lookback_bars = None
+    sync_selection_enabled = bool(cfg.get("sync_selection_enabled", True))
+    sync_selection_interval_sec = int(cfg.get("sync_selection_interval_sec") or 300)
+    sync_selection_max_codes = int(
+        cfg.get("sync_selection_max_codes")
+        or (settings.get("strategy", {}) or {}).get("max_positions")
+        or 20
+    )
+    cancel_missing_selected = bool(cfg.get("cancel_missing_selected", True))
+    generate_sell_queue = bool(cfg.get("generate_sell_queue", False))
+    purge_expired_after_days = int(cfg.get("purge_expired_after_days") or 7)
 
     if info_path:
         info = load_autotrade_info(info_path)
@@ -83,6 +101,12 @@ def load_autotrade_config(settings: dict) -> AutoTradeConfig:
         poll_interval_sec=max(10, poll_interval_sec),
         optimize=optimize,
         optimize_lookback_bars=optimize_lookback_bars,
+        sync_selection_enabled=sync_selection_enabled,
+        sync_selection_interval_sec=max(30, sync_selection_interval_sec),
+        sync_selection_max_codes=max(1, sync_selection_max_codes),
+        cancel_missing_selected=cancel_missing_selected,
+        generate_sell_queue=generate_sell_queue,
+        purge_expired_after_days=max(0, purge_expired_after_days),
     )
 
 
@@ -114,6 +138,313 @@ def _enrich_symbol(store: SQLiteStore, code: str) -> Tuple[str, str, str]:
         excd = excd or (u[2] or "")
 
     return (str(name or ""), str(market or ""), str(excd or ""))
+
+
+_SELECTION_SYNC_STATE: Dict[str, Any] = {"last_ts": 0.0, "last_price_date": ""}
+
+
+def _latest_price_date(store: SQLiteStore) -> str:
+    row = store.conn.execute("SELECT MAX(date) FROM daily_price").fetchone()
+    if row and row[0]:
+        return str(row[0])
+    return ""
+
+
+def _selected_codes_from_strategy(store: SQLiteStore, settings: dict, limit: int) -> Optional[List[str]]:
+    try:
+        params = load_strategy(settings)
+    except Exception:
+        logging.exception("[autotrade] failed to load strategy params")
+        return None
+
+    min_amount = float(getattr(params, "min_amount", 0) or 0)
+    liquidity_rank = int(getattr(params, "liquidity_rank", 0) or 0)
+    buy_nasdaq = float(getattr(params, "buy_kospi", 0) or 0)
+    buy_sp500 = float(getattr(params, "buy_kosdaq", 0) or 0)
+    max_positions = int(getattr(params, "max_positions", 20) or 20)
+    max_per_sector = int(getattr(params, "max_per_sector", 0) or 0)
+    entry_mode = str(getattr(params, "entry_mode", "mean_reversion") or "mean_reversion").lower()
+    rank_mode = str(getattr(params, "rank_mode", "amount") or "amount").lower()
+    trend_filter = bool(getattr(params, "trend_ma25_rising", False))
+    max_pick = max(1, min(int(limit), max_positions))
+
+    sql = """
+    SELECT dp.code,
+           COALESCE(u.market, '') AS market,
+           COALESCE(u.group_name, 'UNKNOWN') AS group_name,
+           COALESCE(sm.industry_name, sm.sector_name, u.group_name, 'UNKNOWN') AS sector_name,
+           CAST(COALESCE(dp.amount, 0) AS REAL) AS amount,
+           CAST(COALESCE(dp.disparity, 0) AS REAL) AS disparity,
+           CAST(COALESCE(dp.ma25, 0) AS REAL) AS ma25,
+           CAST(COALESCE(prev.ma25, 0) AS REAL) AS ma25_prev,
+           CAST(COALESCE(dp.close, 0) AS REAL) AS close,
+           CAST(COALESCE(prev3.close, 0) AS REAL) AS close_prev3
+    FROM daily_price dp
+    JOIN (
+      SELECT code, MAX(date) AS max_date
+      FROM daily_price
+      GROUP BY code
+    ) mx
+      ON dp.code = mx.code
+     AND dp.date = mx.max_date
+    JOIN universe_members u
+      ON dp.code = u.code
+    LEFT JOIN sector_map sm
+      ON sm.code = dp.code
+    LEFT JOIN daily_price prev
+      ON prev.code = dp.code
+     AND prev.date = (
+       SELECT p2.date
+       FROM daily_price p2
+       WHERE p2.code = dp.code
+         AND p2.date < dp.date
+       ORDER BY p2.date DESC
+       LIMIT 1
+     )
+    LEFT JOIN daily_price prev3
+      ON prev3.code = dp.code
+     AND prev3.date = (
+       SELECT p4.date
+       FROM daily_price p4
+       WHERE p4.code = dp.code
+         AND p4.date < dp.date
+       ORDER BY p4.date DESC
+       LIMIT 1 OFFSET 2
+     )
+    ORDER BY amount DESC
+    """
+    rows = store.conn.execute(sql).fetchall()
+    if not rows:
+        return []
+
+    liquid_rows = []
+    for r in rows:
+        amount = float(r[4] or 0)
+        if amount < min_amount:
+            continue
+        liquid_rows.append(r)
+        if liquidity_rank > 0 and len(liquid_rows) >= liquidity_rank:
+            break
+
+    candidates: List[Dict[str, Any]] = []
+    for r in liquid_rows:
+        code = normalize_code(r[0])
+        group_hint = str(r[2] or r[1] or "").upper()
+        sector = str(r[3] or "UNKNOWN")
+        amount = float(r[4] or 0)
+        disparity = float(r[5] or 0)
+        ma25 = float(r[6] or 0)
+        ma25_prev = float(r[7] or 0)
+        close = float(r[8] or 0)
+        close_prev3 = float(r[9] or 0)
+        ret3 = ((close / close_prev3) - 1.0) if close_prev3 > 0 else 0.0
+
+        buy_th = buy_nasdaq if "NASDAQ" in group_hint else buy_sp500
+        if entry_mode == "trend_follow":
+            if not (disparity >= buy_th and ret3 >= 0):
+                continue
+        elif disparity > buy_th:
+            continue
+
+        if trend_filter and not (ma25 > ma25_prev):
+            continue
+
+        score: Optional[float] = None
+        if rank_mode == "score":
+            if entry_mode == "trend_follow":
+                score = disparity + (0.8 * ret3) + (0.05 * math.log1p(max(amount, 0.0)))
+            else:
+                score = (-disparity) + (0.8 * (-ret3)) + (0.05 * math.log1p(max(amount, 0.0)))
+
+        candidates.append(
+            {
+                "code": code,
+                "sector": sector,
+                "amount": amount,
+                "score": score,
+            }
+        )
+
+    if rank_mode == "score":
+        candidates.sort(key=lambda x: float(x.get("score") or 0.0), reverse=True)
+    else:
+        candidates.sort(key=lambda x: float(x.get("amount") or 0.0), reverse=True)
+
+    sector_counts: Dict[str, int] = {}
+    try:
+        held_rows = store.conn.execute(
+            """
+            SELECT p.code,
+                   COALESCE(sm.industry_name, sm.sector_name, u.group_name, 'UNKNOWN') AS sector_name
+            FROM position_state p
+            LEFT JOIN sector_map sm ON p.code = sm.code
+            LEFT JOIN universe_members u ON p.code = u.code
+            """
+        ).fetchall()
+        for h in held_rows:
+            sec = str((h[1] if h else "") or "UNKNOWN")
+            sector_counts[sec] = sector_counts.get(sec, 0) + 1
+    except Exception:
+        sector_counts = {}
+
+    selected: List[str] = []
+    for cand in candidates:
+        sector = str(cand.get("sector") or "UNKNOWN")
+        if max_per_sector and sector_counts.get(sector, 0) >= max_per_sector:
+            continue
+        code = str(cand.get("code") or "").upper()
+        if not code:
+            continue
+        selected.append(code)
+        sector_counts[sector] = sector_counts.get(sector, 0) + 1
+        if len(selected) >= max_pick:
+            break
+    return selected
+
+
+def _sync_selected_watchlist(store: SQLiteStore, settings: dict, cfg: AutoTradeConfig) -> Optional[set[str]]:
+    if not cfg.sync_selection_enabled:
+        return None
+
+    now_ts = time.time()
+    latest_date = _latest_price_date(store)
+    state = _SELECTION_SYNC_STATE
+    # Sync when price date changes or fixed interval elapsed.
+    if (
+        state.get("last_price_date") == latest_date
+        and (now_ts - float(state.get("last_ts", 0.0))) < float(cfg.sync_selection_interval_sec)
+    ):
+        return None
+
+    selected_codes = _selected_codes_from_strategy(store, settings, cfg.sync_selection_max_codes)
+    if selected_codes is None:
+        return None
+
+    rows = store.conn.execute(
+        "SELECT code, list_type, enabled FROM autotrade_watchlist"
+    ).fetchall()
+    row_map = {
+        normalize_code(r[0]): {"list_type": str(r[1] or "").upper(), "enabled": int(r[2] or 0)}
+        for r in rows
+        if r and r[0]
+    }
+
+    managed_selected: set[str] = set()
+    skipped_exit = 0
+    for code in selected_codes:
+        cur = row_map.get(code)
+        if cur and cur["list_type"] == LIST_EXIT and cur["enabled"] == 1:
+            # Respect explicit EXIT rows set by user.
+            skipped_exit += 1
+            continue
+        name, market, excd = _enrich_symbol(store, code)
+        store.upsert_autotrade_watchlist(
+            code,
+            name=name,
+            market=market,
+            excd=excd,
+            list_type=LIST_SELECTED,
+            enabled=True,
+        )
+        managed_selected.add(code)
+
+    to_disable = []
+    desired_set = set(selected_codes)
+    for code, rec in row_map.items():
+        if rec["list_type"] != LIST_SELECTED:
+            continue
+        if rec["enabled"] != 1:
+            continue
+        if code in desired_set:
+            continue
+        to_disable.append(code)
+
+    if to_disable:
+        now = datetime.utcnow().isoformat()
+        for code in to_disable:
+            store.conn.execute(
+                "UPDATE autotrade_watchlist SET enabled=0, updated_at=? WHERE code=? AND list_type=?",
+                (now, code, LIST_SELECTED),
+            )
+        store.conn.commit()
+
+    state["last_ts"] = now_ts
+    state["last_price_date"] = latest_date
+    logging.info(
+        "[autotrade] selection sync managed=%s disabled=%s skipped_exit=%s latest_date=%s",
+        len(managed_selected),
+        len(to_disable),
+        skipped_exit,
+        latest_date or "-",
+    )
+    return managed_selected
+
+
+def _cancel_pending_sells(store: SQLiteStore, reason: str) -> int:
+    now = utc_ts()
+    cur = store.conn.execute(
+        """
+        UPDATE autotrade_queue
+        SET status='CANCELLED', last_error=?, updated_at=?
+        WHERE side='SELL' AND status IN ('PENDING','ERROR','SKIPPED')
+        """,
+        (reason, now),
+    )
+    store.conn.commit()
+    return int(cur.rowcount or 0)
+
+
+def _cancel_missing_selected_buys(store: SQLiteStore, desired_buy_codes: set[str], reason: str) -> int:
+    now = utc_ts()
+    if desired_buy_codes:
+        placeholders = ",".join("?" * len(desired_buy_codes))
+        params: Tuple[Any, ...] = (reason, now, *sorted(desired_buy_codes))
+        sql = (
+            "UPDATE autotrade_queue "
+            "SET status='CANCELLED', last_error=?, updated_at=? "
+            "WHERE side='BUY' AND status IN ('PENDING','ERROR','SKIPPED') "
+            f"AND code NOT IN ({placeholders})"
+        )
+        cur = store.conn.execute(sql, params)
+    else:
+        cur = store.conn.execute(
+            """
+            UPDATE autotrade_queue
+            SET status='CANCELLED', last_error=?, updated_at=?
+            WHERE side='BUY' AND status IN ('PENDING','ERROR','SKIPPED')
+            """,
+            (reason, now),
+        )
+    store.conn.commit()
+    return int(cur.rowcount or 0)
+
+
+def _expire_and_purge_queue(store: SQLiteStore, cfg: AutoTradeConfig) -> Tuple[int, int]:
+    now = utc_ts()
+    # Use latest loaded market date instead of UTC day rollover.
+    # This avoids expiring US queues too early before next daily bar is available.
+    expire_before = _latest_price_date(store) or datetime.utcnow().date().isoformat()
+    expired_cur = store.conn.execute(
+        """
+        UPDATE autotrade_queue
+        SET status='EXPIRED',
+            last_error=CASE WHEN COALESCE(last_error,'')='' THEN 'expired_past_asof' ELSE last_error END,
+            updated_at=?
+        WHERE status IN ('PENDING','ERROR','SKIPPED') AND asof_date < ?
+        """,
+        (now, expire_before),
+    )
+
+    cutoff = (datetime.utcnow().date() - timedelta(days=int(cfg.purge_expired_after_days))).isoformat()
+    purged_cur = store.conn.execute(
+        """
+        DELETE FROM autotrade_queue
+        WHERE status IN ('EXPIRED','CANCELLED') AND asof_date < ?
+        """,
+        (cutoff,),
+    )
+    store.conn.commit()
+    return int(expired_cur.rowcount or 0), int(purged_cur.rowcount or 0)
 
 
 def _ensure_plan_and_queue_for_code(store: SQLiteStore, cfg: AutoTradeConfig, code: str) -> Optional[str]:
@@ -204,7 +535,7 @@ def _ensure_plan_and_queue_for_code(store: SQLiteStore, cfg: AutoTradeConfig, co
             payload_json=json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str),
         )
 
-    if target_price is not None:
+    if cfg.generate_sell_queue and target_price is not None:
         payload = build_limit_order(
             password=info.password,
             exchange=exchange,
@@ -433,6 +764,21 @@ def run_cycle(store: SQLiteStore, settings: dict, cfg: AutoTradeConfig, *, dry_r
     if not cfg.enabled:
         return
 
+    expired, purged = _expire_and_purge_queue(store, cfg)
+    if expired or purged:
+        logging.info("[autotrade] queue maintenance expired=%s purged=%s", expired, purged)
+
+    managed_selected = _sync_selected_watchlist(store, settings, cfg)
+    if managed_selected is not None and cfg.cancel_missing_selected:
+        cancelled = _cancel_missing_selected_buys(store, managed_selected, "cancelled_missing_selection")
+        if cancelled:
+            logging.info("[autotrade] cancelled missing BUY queue=%s", cancelled)
+
+    if not cfg.generate_sell_queue:
+        cancelled_sell = _cancel_pending_sells(store, "sell_queue_disabled")
+        if cancelled_sell:
+            logging.info("[autotrade] cancelled pending SELL queue=%s", cancelled_sell)
+
     watch = store.list_autotrade_watchlist(enabled_only=True)
     for row in watch:
         code = str(row["code"] or "").strip().upper()
@@ -462,9 +808,12 @@ def run_cycle(store: SQLiteStore, settings: dict, cfg: AutoTradeConfig, *, dry_r
         price_rec = price_map.get(code) or {}
         price = price_rec.get("price")
         if price is None:
+            logging.warning("[autotrade] skip dispatch %s: current price unavailable", code)
             continue
 
         for it in items:
+            if str(it.get("side") or "").upper() == "SELL" and not cfg.generate_sell_queue:
+                continue
             if not _should_dispatch(it.get("list_type", ""), it.get("side", "")):
                 continue
             tp = it.get("trigger_price")
