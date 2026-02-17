@@ -1,0 +1,20 @@
+[Unit]
+Description=Trader-US Autotrade Worker
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trader-US
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/trader-US/.venv/bin/python -u -m src.autotrade.worker
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
