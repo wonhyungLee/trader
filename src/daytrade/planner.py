@@ -11,6 +11,19 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from pandas.tseries.holiday import (
+    AbstractHolidayCalendar,
+    Holiday,
+    nearest_workday,
+    USMartinLutherKingJr,
+    USPresidentsDay,
+    GoodFriday,
+    USMemorialDay,
+    USLaborDay,
+    USThanksgivingDay,
+)
+from pandas.tseries.offsets import CustomBusinessDay
+
 from src.analyzer.backtest_runner import load_strategy
 from src.storage.sqlite_store import SQLiteStore
 from src.utils.config import load_settings, load_yaml
@@ -19,6 +32,30 @@ from .indicators import rolling_sma, rsi_sma, atr_sma
 
 
 ACCOUNT_SNAPSHOT_PATH = Path("data/account_snapshot.json")
+
+
+class _NYSEHolidayCalendar(AbstractHolidayCalendar):
+    """A lightweight NYSE holiday calendar for exec_date calculation.
+
+    This is *not* a perfect market calendar (it does not cover ad-hoc closures),
+    but it correctly skips standard NYSE holidays such as Presidents Day and Good Friday.
+    """
+
+    rules = [
+        Holiday("NewYearsDay", month=1, day=1, observance=nearest_workday),
+        USMartinLutherKingJr,
+        USPresidentsDay,
+        GoodFriday,
+        USMemorialDay,
+        Holiday("Juneteenth", month=6, day=19, observance=nearest_workday, start_date="2021-06-19"),
+        Holiday("IndependenceDay", month=7, day=4, observance=nearest_workday),
+        USLaborDay,
+        USThanksgivingDay,
+        Holiday("Christmas", month=12, day=25, observance=nearest_workday),
+    ]
+
+
+_NYSE_BDAY = CustomBusinessDay(calendar=_NYSEHolidayCalendar())
 
 
 def _safe_float(v: Any) -> Optional[float]:
@@ -60,8 +97,13 @@ def latest_price_date(conn: sqlite3.Connection) -> Optional[str]:
 
 
 def next_business_day(date_ymd: str) -> str:
+    """Return next NYSE business day.
+
+    Skips weekends + standard NYSE holidays (e.g., Presidents Day, Good Friday).
+    Exceptional closures (e.g., national mourning days) are not included.
+    """
     d = pd.Timestamp(date_ymd)
-    nd = (d + pd.tseries.offsets.BDay(1)).date()
+    nd = (d + _NYSE_BDAY).date()
     return str(nd)
 
 
