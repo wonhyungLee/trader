@@ -7,7 +7,8 @@ NASDAQ100 + S&P500 종목을 대상으로 하는 **조회 전용 대시보드**�
 - ✅ 전략 조건 기반 '매수 후보(Selection)' 조회
 - ✅ 선택 종목 `Current Price` 1분 갱신 표시
 - ✅ DB watchdog 기반 주기적 데이터 증분/보정
-- ❌ 자동매매/주문 기능 없음
+- ✅ (옵션) TraderUS 선정 + Daytrade(Balanced) **주문 계획(order_queue) 생성**
+- ❌ 실주문 전송/체결 관리 기능 없음
 - ❌ 잔고/포트폴리오 기능 없음
 
 ---
@@ -90,6 +91,28 @@ python server.py
 ./run_refill.sh      # foreground
 ./run_refill_bg.sh   # background + logs/refill_bg.log
 ```
+
+---
+
+## 8) Daytrade(Balanced) 주문 계획 생성 (옵션)
+
+`config/strategy.yaml`의 `daytrade:` 섹션을 켠 뒤, 아래 명령으로
+**다음 거래일에 실행할 주문 계획을 `order_queue`에 적재**할 수 있습니다.
+
+> ⚠️ 주의: 이 레포는 주문 전송(브로커 API)까지는 포함하지 않습니다.
+> `order_queue`는 "주문 계획" 저장용이며, 실제 주문/브라켓(OCO) 실행기는 별도 구현이 필요합니다.
+
+```bash
+# (close) 전일 종가 기준 신호로 다음 거래일 주문 계획 생성
+python -m src.daytrade close
+
+# (dryrun) DB에는 쓰지 않고 결과만 출력
+python -m src.daytrade dryrun
+```
+
+산출물:
+- `data/daytrade_plans_YYYY-MM-DD.csv` : 트리거된 플랜(진입/손절/익절)
+- `order_queue` : exec_date 기준 PENDING 주문(진입가/손절가/익절가 포함)
 
 ---
 

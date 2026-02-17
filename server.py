@@ -1370,7 +1370,8 @@ def plans():
         df = pd.read_sql_query(
             """
             SELECT o.id, o.signal_date, o.exec_date, o.code, o.side, o.qty, o.rank, o.status,
-                   o.ord_dvsn, o.ord_unpr, o.created_at, o.updated_at,
+                   o.ord_dvsn, o.ord_unpr, o.stop_unpr, o.target_unpr, o.strategy, o.meta_json,
+                   o.created_at, o.updated_at,
                    u.name, u.market, s.sector_name, s.industry_name
             FROM order_queue o
             LEFT JOIN universe_members u ON o.code = u.code

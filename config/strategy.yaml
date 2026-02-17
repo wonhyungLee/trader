@@ -28,3 +28,48 @@ position:
 
 report:
   selection_horizon_days: 1
+
+# -----------------------------
+# Day-trade (자동매매) 설정
+# -----------------------------
+#
+# TraderUS 선정(위 entry/buy 설정)을 1차 필터로 사용한 뒤,
+# 아래 daytrade 신호/브라켓 규칙으로 '당일청산' 트레이드를 수행합니다.
+#
+# Balanced (추천) 파라미터:
+# - 진입: Entry = Close(t) - 1.0 * ATR14(t)
+# - 손절: Stop  = Entry  - 1.75 * ATR14(t)
+# - 익절: TP    = Entry  + 0.75 * ATR14(t)
+# - 신호: Close(t) < SMA5(t) AND RSI2(t) <= 10
+# - 청산: 손절/익절 미체결 시 당일 종가 청산(EOD)
+# - 수수료: 0.2%/side (= 20 bps/side) 가정
+daytrade:
+  enabled: true
+  mode: "balanced"  # balanced | win90 (참고)
+
+  signal:
+    rsi_period: 2
+    rsi_thresh: 10
+    sma_fast: 5
+    use_trend_filter: false
+    sma_trend: 200
+    atr_period: 14
+
+  bracket:
+    entry_k: 1.0
+    stop_mult: 1.75
+    target_mult: 0.75
+    both_hit_rule: "stop_first"  # 일봉에서 stop/target 동시 터치 시 보수적 가정
+
+  execution:
+    # 하루에 실제 주문을 낼 최대 종목 수 (자동화 난이도/리스크 제어)
+    max_orders_per_day: 5
+    # 포지션 사이징: 계좌 총자산 * alloc_pct 를 1건에 배분
+    alloc_pct: 0.20
+    # 수수료(bps, 1bp=0.01%). 20bps=0.2%
+    fee_bps: 20
+    # 너무 변동성이 낮은 종목은 수수료를 못 이길 수 있어 필터링
+    min_atr_pct: 0.0
+    # 지정가 주문 코드(브로커/시장별로 다를 수 있음)
+    ord_dvsn: "00"
+

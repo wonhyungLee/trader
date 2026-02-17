@@ -97,6 +97,11 @@ SCHEMA = {
             status TEXT,
             ord_dvsn TEXT,
             ord_unpr REAL,
+            -- Optional fields for bracket/daytrade plans (backward compatible)
+            stop_unpr REAL,
+            target_unpr REAL,
+            strategy TEXT,
+            meta_json TEXT,
             odno TEXT,
             ord_orgno TEXT,
             filled_qty INTEGER,
@@ -330,12 +335,34 @@ class SQLiteStore:
             cur.execute(ddl)
         self._ensure_refill_progress_columns()
         self._ensure_universe_columns()
+        self._ensure_order_queue_columns()
         for idx in INDEXES:
             try:
                 cur.execute(idx)
             except (sqlite3.IntegrityError, sqlite3.OperationalError) as exc:
                 logging.warning('failed to create index: %s (%s)', idx, exc)
         self.conn.commit()
+
+    def _ensure_order_queue_columns(self):
+        """Backward-compatible migration for order_queue.
+
+        과거 버전 DB(자동매매 기능이 없던 viewer)에서도 order_queue 테이블은
+        존재할 수 있습니다. Daytrade/브라켓 주문 계획을 저장하기 위해
+        필요한 컬럼을 점진적으로 추가합니다.
+        """
+        try:
+            cur = self.conn.execute("PRAGMA table_info(order_queue)")
+            cols = {row[1] for row in cur.fetchall()}
+            if "stop_unpr" not in cols:
+                self.conn.execute("ALTER TABLE order_queue ADD COLUMN stop_unpr REAL")
+            if "target_unpr" not in cols:
+                self.conn.execute("ALTER TABLE order_queue ADD COLUMN target_unpr REAL")
+            if "strategy" not in cols:
+                self.conn.execute("ALTER TABLE order_queue ADD COLUMN strategy TEXT")
+            if "meta_json" not in cols:
+                self.conn.execute("ALTER TABLE order_queue ADD COLUMN meta_json TEXT")
+        except Exception as exc:
+            logging.warning("failed to ensure order_queue columns: %s", exc)
 
     def _ensure_refill_progress_columns(self):
         try:
@@ -656,6 +683,10 @@ class SQLiteStore:
                     "PENDING",
                     o.get("ord_dvsn", "01"),
                     float(o.get("ord_unpr") or 0),
+                    (float(o.get("stop_unpr")) if o.get("stop_unpr") is not None else None),
+                    (float(o.get("target_unpr")) if o.get("target_unpr") is not None else None),
+                    o.get("strategy"),
+                    o.get("meta_json"),
                     None,
                     None,
                     0,
@@ -671,8 +702,9 @@ class SQLiteStore:
             """
             INSERT INTO order_queue(
                 signal_date, exec_date, code, side, qty, rank, status, ord_dvsn, ord_unpr,
+                stop_unpr, target_unpr, strategy, meta_json,
                 odno, ord_orgno, filled_qty, avg_price, api_resp, cancel_resp, created_at, sent_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             rows,
         )
